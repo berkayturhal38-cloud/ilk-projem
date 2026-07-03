@@ -1,19 +1,17 @@
 //@version=6
 // ============================================================================
-//  Turhal Smart Fibonacci PRO  (flat / mobile-safe build)
+//  Turhal Smart Fibonacci PRO  (flat / mobile-safe build, no code blocks)
 //  Auto-Fibonacci: swing detection, trend-aware levels, golden zone,
 //  extensions, dashboard, multi-timeframe & alerts.
 //  Author: berkayturhal38   |   License: MPL-2.0
 // ============================================================================
 indicator("Turhal Smart Fibonacci PRO", "Turhal Fib PRO", overlay=true)
 
-// ---- Inputs: Swing ----
 gS = "Swing Detection"
 pivotLen = input.int(15, "Swing Sensitivity", minval=1, maxval=200, group=gS)
 dirMode = input.string("Auto", "Direction", options=["Auto", "EMA Filter", "Manual Up", "Manual Down"], group=gS)
 emaLen = input.int(50, "EMA Filter Length", minval=1, group=gS)
 
-// ---- Inputs: Retracements ----
 gR = "Retracement Levels"
 showRetr = input.bool(true, "Show Retracements", group=gR)
 r0 = input.bool(true, "0.0", inline="0", group=gR)
@@ -31,7 +29,6 @@ c786 = input.color(#2962ff, "", inline="5", group=gR)
 r1 = input.bool(true, "1.0", inline="6", group=gR)
 c1 = input.color(#787b86, "", inline="6", group=gR)
 
-// ---- Inputs: Extensions ----
 gE = "Extension Levels"
 showExt = input.bool(true, "Show Extensions", group=gE)
 e1272 = input.bool(true, "1.272", inline="e0", group=gE)
@@ -41,29 +38,22 @@ ce1618 = input.color(#e91e63, "", inline="e1", group=gE)
 e2618 = input.bool(true, "2.618", inline="e2", group=gE)
 ce2618 = input.color(#e91e63, "", inline="e2", group=gE)
 
-// ---- Inputs: Golden Zone ----
 gG = "Golden Zone"
 showGold = input.bool(true, "Show Golden Zone", group=gG)
 goldFrom = input.float(0.618, "From", step=0.001, group=gG, inline="g")
 goldTo = input.float(0.786, "To", step=0.001, group=gG, inline="g")
 goldCol = input.color(#ffd700, "Color", group=gG)
 
-// ---- Inputs: Visuals & Dashboard ----
 gV = "Visuals"
 theme = input.string("Dark", "Theme", options=["Dark", "Light", "Neon"], group=gV)
 lineW = input.int(2, "Line Width", minval=1, maxval=4, group=gV)
 tblPos = input.string("Top Right", "Table Position", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group=gV)
 
-// ---- Inputs: Multi-Timeframe ----
 gM = "Multi-Timeframe"
 showMtf = input.bool(false, "Show HTF 0.5 / 0.618", group=gM)
 mtfTf = input.timeframe("240", "Higher Timeframe", group=gM)
 mtfLen = input.int(50, "HTF Lookback", minval=5, group=gM)
 
-// ---- One-line helpers (no indented body) ----
-f_pos(s) => s == "Top Left" ? position.top_left : s == "Bottom Right" ? position.bottom_right : s == "Bottom Left" ? position.bottom_left : position.top_right
-
-// ---- Swing detection (flat, ternary state) ----
 ph = ta.pivothigh(pivotLen, pivotLen)
 pl = ta.pivotlow(pivotLen, pivotLen)
 var float lastPH = na
@@ -75,7 +65,6 @@ lastPHb := na(ph) ? lastPHb : bar_index - pivotLen
 lastPL := na(pl) ? lastPL : pl
 lastPLb := na(pl) ? lastPLb : bar_index - pivotLen
 
-// ---- Direction & anchor ----
 emaVal = ta.ema(close, emaLen)
 autoUp = (not na(lastPHb) and not na(lastPLb)) ? lastPHb > lastPLb : na
 curUp = dirMode == "Manual Up" ? true : dirMode == "Manual Down" ? false : dirMode == "EMA Filter" ? close > emaVal : autoUp
@@ -83,43 +72,38 @@ hasAnchor = not na(lastPH) and not na(lastPL) and not na(curUp)
 price0 = curUp ? lastPH : lastPL
 price1 = curUp ? lastPL : lastPH
 rng = price0 - price1
-lv(r) => hasAnchor ? price0 + (price1 - price0) * r : na
 
-// ---- Retracement plots ----
-plot(showRetr and r0 ? lv(0.0) : na, "0.0", color=c0, linewidth=lineW, style=plot.style_linebr)
-plot(showRetr and r236 ? lv(0.236) : na, "0.236", color=c236, linewidth=lineW, style=plot.style_linebr)
-plot(showRetr and r382 ? lv(0.382) : na, "0.382", color=c382, linewidth=lineW, style=plot.style_linebr)
-plot(showRetr and r5 ? lv(0.5) : na, "0.5", color=c5, linewidth=lineW, style=plot.style_linebr)
-plot(showRetr and r618 ? lv(0.618) : na, "0.618", color=c618, linewidth=lineW, style=plot.style_linebr)
-plot(showRetr and r786 ? lv(0.786) : na, "0.786", color=c786, linewidth=lineW, style=plot.style_linebr)
-plot(showRetr and r1 ? lv(1.0) : na, "1.0", color=c1, linewidth=lineW, style=plot.style_linebr)
+plot(showRetr and r0 and hasAnchor ? price0 + (price1 - price0) * 0.0 : na, "0.0", color=c0, linewidth=lineW, style=plot.style_linebr)
+plot(showRetr and r236 and hasAnchor ? price0 + (price1 - price0) * 0.236 : na, "0.236", color=c236, linewidth=lineW, style=plot.style_linebr)
+plot(showRetr and r382 and hasAnchor ? price0 + (price1 - price0) * 0.382 : na, "0.382", color=c382, linewidth=lineW, style=plot.style_linebr)
+plot(showRetr and r5 and hasAnchor ? price0 + (price1 - price0) * 0.5 : na, "0.5", color=c5, linewidth=lineW, style=plot.style_linebr)
+plot(showRetr and r618 and hasAnchor ? price0 + (price1 - price0) * 0.618 : na, "0.618", color=c618, linewidth=lineW, style=plot.style_linebr)
+plot(showRetr and r786 and hasAnchor ? price0 + (price1 - price0) * 0.786 : na, "0.786", color=c786, linewidth=lineW, style=plot.style_linebr)
+plot(showRetr and r1 and hasAnchor ? price0 + (price1 - price0) * 1.0 : na, "1.0", color=c1, linewidth=lineW, style=plot.style_linebr)
 
-// ---- Extension plots ----
-plot(showExt and e1272 ? lv(1.272) : na, "1.272", color=ce1272, linewidth=lineW, style=plot.style_linebr)
-plot(showExt and e1618 ? lv(1.618) : na, "1.618", color=ce1618, linewidth=lineW, style=plot.style_linebr)
-plot(showExt and e2618 ? lv(2.618) : na, "2.618", color=ce2618, linewidth=lineW, style=plot.style_linebr)
+plot(showExt and e1272 and hasAnchor ? price0 + (price1 - price0) * 1.272 : na, "1.272", color=ce1272, linewidth=lineW, style=plot.style_linebr)
+plot(showExt and e1618 and hasAnchor ? price0 + (price1 - price0) * 1.618 : na, "1.618", color=ce1618, linewidth=lineW, style=plot.style_linebr)
+plot(showExt and e2618 and hasAnchor ? price0 + (price1 - price0) * 2.618 : na, "2.618", color=ce2618, linewidth=lineW, style=plot.style_linebr)
 
-// ---- Golden Zone (fill between two hidden plots) ----
-gLo = showGold ? lv(math.min(goldFrom, goldTo)) : na
-gHi = showGold ? lv(math.max(goldFrom, goldTo)) : na
+gLo = showGold and hasAnchor ? price0 + (price1 - price0) * math.min(goldFrom, goldTo) : na
+gHi = showGold and hasAnchor ? price0 + (price1 - price0) * math.max(goldFrom, goldTo) : na
 pGlo = plot(gLo, "GZ Low", color=color.new(goldCol, 100), style=plot.style_linebr)
 pGhi = plot(gHi, "GZ High", color=color.new(goldCol, 100), style=plot.style_linebr)
 fill(pGlo, pGhi, color=color.new(goldCol, 82), title="Golden Zone")
 
-// ---- Multi-Timeframe confluence ----
 htfHi = request.security(syminfo.tickerid, mtfTf, ta.highest(high, mtfLen), lookahead=barmerge.lookahead_off)
 htfLo = request.security(syminfo.tickerid, mtfTf, ta.lowest(low, mtfLen), lookahead=barmerge.lookahead_off)
 plot(showMtf and not na(htfHi) ? htfHi - (htfHi - htfLo) * 0.618 : na, "HTF 0.618", color=color.orange, linewidth=2, style=plot.style_linebr)
 plot(showMtf and not na(htfHi) ? htfHi - (htfHi - htfLo) * 0.5 : na, "HTF 0.5", color=color.gray, linewidth=1, style=plot.style_linebr)
 
-// ---- Dashboard (flat cells) ----
 isLight = theme == "Light"
 txtCol = isLight ? color.black : color.white
 headBg = isLight ? color.new(color.gray, 80) : color.new(color.black, 20)
 posPct = hasAnchor and rng != 0 ? (price0 - close) / rng * 100 : na
 dirTxt = na(curUp) ? "-" : curUp ? "UP" : "DOWN"
 dirBg = na(curUp) ? color.gray : curUp ? color.new(color.green, 55) : color.new(color.red, 55)
-var table dash = table.new(f_pos(tblPos), 2, 5, border_width=1, frame_color=color.new(color.gray, 40), frame_width=1)
+tblP = tblPos == "Top Left" ? position.top_left : tblPos == "Bottom Right" ? position.bottom_right : tblPos == "Bottom Left" ? position.bottom_left : position.top_right
+var table dash = table.new(tblP, 2, 5, border_width=1, frame_color=color.new(color.gray, 40), frame_width=1)
 table.cell(dash, 0, 0, "Turhal Fib PRO", text_color=txtCol, bgcolor=headBg, text_size=size.small)
 table.cell(dash, 1, 0, dirTxt, text_color=txtCol, bgcolor=dirBg, text_size=size.small)
 table.cell(dash, 0, 1, "High (0%)", text_color=txtCol, bgcolor=headBg, text_size=size.tiny)
@@ -131,7 +115,6 @@ table.cell(dash, 1, 3, na(rng) ? "-" : str.tostring(math.abs(rng), format.mintic
 table.cell(dash, 0, 4, "Retr %", text_color=txtCol, bgcolor=headBg, text_size=size.tiny)
 table.cell(dash, 1, 4, na(posPct) ? "-" : str.tostring(posPct, "0.0") + " %", text_color=txtCol, bgcolor=headBg, text_size=size.tiny)
 
-// ---- Alerts ----
 inGold = hasAnchor and close <= gHi and close >= gLo
 goldEntry = inGold and not inGold[1]
 brokeHi = hasAnchor and ta.crossover(close, price0)
