@@ -1,7 +1,5 @@
 //@version=6
 // Turhal Auto Fibonacci PRO (flat / mobile-safe)
-// Classic-look auto fibonacci: trend-aware swing, proportional levels,
-// colored zone fills, golden zone, connector line, labels & alerts.
 // Author: berkayturhal38 | License: MPL-2.0
 indicator("Turhal Auto Fibonacci PRO", "Turhal Fib", overlay=true, max_lines_count=40, max_labels_count=40, max_boxes_count=20)
 
@@ -12,9 +10,12 @@ dirMode = input.string("Auto", "Direction", options=["Auto", "Up", "Down"], grou
 gv = "Style"
 lineW = input.int(1, "Level Line Width", minval=1, maxval=4, group=gv)
 showFill = input.bool(true, "Fill Zones", group=gv)
-fillT = input.int(88, "Zone Transparency", minval=50, maxval=98, group=gv)
+fillT = input.int(85, "Zone Transparency", minval=50, maxval=98, group=gv)
 showConn = input.bool(true, "Show Connector Line", group=gv)
 showLbl = input.bool(true, "Show Labels", group=gv)
+labelOff = input.int(4, "Label Offset (bars)", minval=0, maxval=30, group=gv)
+showMarkers = input.bool(true, "Show Swing H/L Markers", group=gv)
+hlBg = input.bool(true, "Highlight Golden Zone Background", group=gv)
 
 gc = "Colors"
 c0 = input.color(#787b86, "0.0", group=gc)
@@ -43,6 +44,10 @@ hasData = not na(aa) and not na(bb) and rng != 0
 leftX = hhBar < llBar ? bar_index + hhBar : bar_index + llBar
 startBar = up ? bar_index + llBar : bar_index + hhBar
 endBar = up ? bar_index + hhBar : bar_index + llBar
+highBar = bar_index + hhBar
+lowBar = bar_index + llBar
+lbX = bar_index + labelOff
+goldT = fillT - 25 < 45 ? 45 : fillT - 25
 
 lp0 = hasData ? aa + rng * 0.0 : na
 lp236 = hasData ? aa + rng * 0.236 : na
@@ -83,7 +88,7 @@ box.set_top(z5, showFill ? math.max(lp618, lp786) : na)
 box.set_bottom(z5, showFill ? math.min(lp618, lp786) : na)
 box.set_left(z5, leftX)
 box.set_right(z5, bar_index)
-box.set_bgcolor(z5, color.new(goldCol, fillT - 20 < 50 ? 50 : fillT - 20))
+box.set_bgcolor(z5, color.new(goldCol, goldT))
 box.set_top(z6, showFill ? math.max(lp786, lp1) : na)
 box.set_bottom(z6, showFill ? math.min(lp786, lp1) : na)
 box.set_left(z6, leftX)
@@ -94,7 +99,7 @@ var line l0 = line.new(na, na, na, na, extend=extend.right, color=c0, width=line
 var line l236 = line.new(na, na, na, na, extend=extend.right, color=c236, width=lineW)
 var line l382 = line.new(na, na, na, na, extend=extend.right, color=c382, width=lineW)
 var line l5 = line.new(na, na, na, na, extend=extend.right, color=c5, width=lineW)
-var line l618 = line.new(na, na, na, na, extend=extend.right, color=c618, width=lineW)
+var line l618 = line.new(na, na, na, na, extend=extend.right, color=c618, width=lineW + 1)
 var line l786 = line.new(na, na, na, na, extend=extend.right, color=c786, width=lineW)
 var line l1 = line.new(na, na, na, na, extend=extend.right, color=c1, width=lineW)
 
@@ -113,32 +118,39 @@ line.set_xy2(l786, bar_index, lp786)
 line.set_xy1(l1, leftX, lp1)
 line.set_xy2(l1, bar_index, lp1)
 
-var line conn = line.new(na, na, na, na, color=color.new(color.gray, 20), width=1, style=line.style_dashed)
+var line conn = line.new(na, na, na, na, color=color.new(color.gray, 10), width=1, style=line.style_dashed)
 line.set_xy1(conn, showConn ? startBar : na, showConn ? bb : na)
 line.set_xy2(conn, showConn ? endBar : na, showConn ? aa : na)
 
-var label b0 = label.new(na, na, "", style=label.style_label_left, color=color.new(c0, 100), textcolor=c0, size=size.small)
-var label b236 = label.new(na, na, "", style=label.style_label_left, color=color.new(c236, 100), textcolor=c236, size=size.small)
-var label b382 = label.new(na, na, "", style=label.style_label_left, color=color.new(c382, 100), textcolor=c382, size=size.small)
-var label b5 = label.new(na, na, "", style=label.style_label_left, color=color.new(c5, 100), textcolor=c5, size=size.small)
-var label b618 = label.new(na, na, "", style=label.style_label_left, color=color.new(c618, 100), textcolor=c618, size=size.small)
-var label b786 = label.new(na, na, "", style=label.style_label_left, color=color.new(c786, 100), textcolor=c786, size=size.small)
-var label b1 = label.new(na, na, "", style=label.style_label_left, color=color.new(c1, 100), textcolor=c1, size=size.small)
+var label b0 = label.new(na, na, "", style=label.style_label_left, color=color.new(color.black, 20), textcolor=c0, size=size.small)
+var label b236 = label.new(na, na, "", style=label.style_label_left, color=color.new(color.black, 20), textcolor=c236, size=size.small)
+var label b382 = label.new(na, na, "", style=label.style_label_left, color=color.new(color.black, 20), textcolor=c382, size=size.small)
+var label b5 = label.new(na, na, "", style=label.style_label_left, color=color.new(color.black, 20), textcolor=c5, size=size.small)
+var label b618 = label.new(na, na, "", style=label.style_label_left, color=color.new(color.black, 20), textcolor=c618, size=size.small)
+var label b786 = label.new(na, na, "", style=label.style_label_left, color=color.new(color.black, 20), textcolor=c786, size=size.small)
+var label b1 = label.new(na, na, "", style=label.style_label_left, color=color.new(color.black, 20), textcolor=c1, size=size.small)
 
-label.set_xy(b0, bar_index, lp0)
-label.set_text(b0, showLbl and not na(lp0) ? "0.0  (" + str.tostring(lp0, format.mintick) + ")" : "")
-label.set_xy(b236, bar_index, lp236)
-label.set_text(b236, showLbl and not na(lp236) ? "0.236  (" + str.tostring(lp236, format.mintick) + ")" : "")
-label.set_xy(b382, bar_index, lp382)
-label.set_text(b382, showLbl and not na(lp382) ? "0.382  (" + str.tostring(lp382, format.mintick) + ")" : "")
-label.set_xy(b5, bar_index, lp5)
-label.set_text(b5, showLbl and not na(lp5) ? "0.5  (" + str.tostring(lp5, format.mintick) + ")" : "")
-label.set_xy(b618, bar_index, lp618)
-label.set_text(b618, showLbl and not na(lp618) ? "0.618  (" + str.tostring(lp618, format.mintick) + ")" : "")
-label.set_xy(b786, bar_index, lp786)
-label.set_text(b786, showLbl and not na(lp786) ? "0.786  (" + str.tostring(lp786, format.mintick) + ")" : "")
-label.set_xy(b1, bar_index, lp1)
-label.set_text(b1, showLbl and not na(lp1) ? "1.0  (" + str.tostring(lp1, format.mintick) + ")" : "")
+label.set_xy(b0, lbX, lp0)
+label.set_text(b0, showLbl and not na(lp0) ? "0.0  " + str.tostring(lp0, format.mintick) : "")
+label.set_xy(b236, lbX, lp236)
+label.set_text(b236, showLbl and not na(lp236) ? "0.236  " + str.tostring(lp236, format.mintick) : "")
+label.set_xy(b382, lbX, lp382)
+label.set_text(b382, showLbl and not na(lp382) ? "0.382  " + str.tostring(lp382, format.mintick) : "")
+label.set_xy(b5, lbX, lp5)
+label.set_text(b5, showLbl and not na(lp5) ? "0.5  " + str.tostring(lp5, format.mintick) : "")
+label.set_xy(b618, lbX, lp618)
+label.set_text(b618, showLbl and not na(lp618) ? "0.618  " + str.tostring(lp618, format.mintick) : "")
+label.set_xy(b786, lbX, lp786)
+label.set_text(b786, showLbl and not na(lp786) ? "0.786  " + str.tostring(lp786, format.mintick) : "")
+label.set_xy(b1, lbX, lp1)
+label.set_text(b1, showLbl and not na(lp1) ? "1.0  " + str.tostring(lp1, format.mintick) : "")
+
+var label mkH = label.new(na, na, "", style=label.style_label_down, color=color.new(#f23645, 20), textcolor=color.white, size=size.small)
+var label mkL = label.new(na, na, "", style=label.style_label_up, color=color.new(#4caf50, 20), textcolor=color.white, size=size.small)
+label.set_xy(mkH, highBar, showMarkers ? hh : na)
+label.set_text(mkH, showMarkers and not na(hh) ? "H" : "")
+label.set_xy(mkL, lowBar, showMarkers ? ll : na)
+label.set_text(mkL, showMarkers and not na(ll) ? "L" : "")
 
 posPct = hasData ? (close - aa) / rng * 100 : na
 dirTxt = not hasData ? "-" : up ? "UP" : "DOWN"
@@ -160,6 +172,7 @@ inGold = hasData and close <= gHi and close >= gLo
 goldEntry = inGold and not inGold[1]
 touch618 = hasData and low <= lp618 and high >= lp618
 broke100 = hasData and (ta.crossover(close, bb) or ta.crossunder(close, bb))
+bgcolor(hlBg and inGold ? color.new(goldCol, 90) : na)
 alertcondition(goldEntry, "Golden Zone Entry", "Turhal Fib: price entered the Golden Zone")
 alertcondition(touch618, "Touch 0.618", "Turhal Fib: price touched the 0.618 level")
 alertcondition(broke100, "Broke 100% Level", "Turhal Fib: price broke the 100% level")
