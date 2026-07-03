@@ -1,0 +1,109 @@
+//@version=6
+// Turhal Fibonacci S/R PRO (flat / mobile-safe)
+// Fibonacci levels drawn as thick full-width support/resistance lines.
+// Author: berkayturhal38 | License: MPL-2.0
+indicator("Turhal Fibonacci S/R PRO", "Turhal Fib S/R", overlay=true, max_lines_count=50, max_labels_count=50, max_boxes_count=10)
+
+g = "Settings"
+pivotLen = input.int(15, "Swing Sensitivity", minval=1, maxval=200, group=g)
+wid = input.int(2, "Line Width", minval=1, maxval=5, group=g)
+showLbl = input.bool(true, "Show Price Labels", group=g)
+showRetr = input.bool(true, "Show Retracements", group=g)
+showExt = input.bool(true, "Show Extensions", group=g)
+showGold = input.bool(true, "Show Golden Zone", group=g)
+
+gc = "Colors"
+c0 = input.color(#787b86, "0.0", group=gc)
+c236 = input.color(#f23645, "0.236", group=gc)
+c382 = input.color(#ff9800, "0.382", group=gc)
+c5 = input.color(#4caf50, "0.5", group=gc)
+c618 = input.color(#00bcd4, "0.618", group=gc)
+c786 = input.color(#2962ff, "0.786", group=gc)
+c1 = input.color(#787b86, "1.0", group=gc)
+ce1272 = input.color(#9c27b0, "1.272", group=gc)
+ce1618 = input.color(#e91e63, "1.618", group=gc)
+goldCol = input.color(#ffd700, "Golden Zone", group=gc)
+
+ph = ta.pivothigh(pivotLen, pivotLen)
+pl = ta.pivotlow(pivotLen, pivotLen)
+var float hi = na
+var float lo = na
+hi := na(ph) ? hi : ph
+lo := na(pl) ? lo : pl
+rng = hi - lo
+
+p0 = showRetr ? hi - rng * 0.0 : na
+p236 = showRetr ? hi - rng * 0.236 : na
+p382 = showRetr ? hi - rng * 0.382 : na
+p5 = showRetr ? hi - rng * 0.5 : na
+p618 = showRetr ? hi - rng * 0.618 : na
+p786 = showRetr ? hi - rng * 0.786 : na
+p1 = showRetr ? hi - rng * 1.0 : na
+p1272 = showExt ? hi - rng * 1.272 : na
+p1618 = showExt ? hi - rng * 1.618 : na
+
+var line l0 = line.new(na, na, na, na, extend=extend.both, color=c0, width=wid)
+var line l236 = line.new(na, na, na, na, extend=extend.both, color=c236, width=wid)
+var line l382 = line.new(na, na, na, na, extend=extend.both, color=c382, width=wid)
+var line l5 = line.new(na, na, na, na, extend=extend.both, color=c5, width=wid)
+var line l618 = line.new(na, na, na, na, extend=extend.both, color=c618, width=wid)
+var line l786 = line.new(na, na, na, na, extend=extend.both, color=c786, width=wid)
+var line l1 = line.new(na, na, na, na, extend=extend.both, color=c1, width=wid)
+var line l1272 = line.new(na, na, na, na, extend=extend.both, color=ce1272, width=wid)
+var line l1618 = line.new(na, na, na, na, extend=extend.both, color=ce1618, width=wid)
+
+line.set_xy1(l0, bar_index - 1, p0)
+line.set_xy2(l0, bar_index, p0)
+line.set_xy1(l236, bar_index - 1, p236)
+line.set_xy2(l236, bar_index, p236)
+line.set_xy1(l382, bar_index - 1, p382)
+line.set_xy2(l382, bar_index, p382)
+line.set_xy1(l5, bar_index - 1, p5)
+line.set_xy2(l5, bar_index, p5)
+line.set_xy1(l618, bar_index - 1, p618)
+line.set_xy2(l618, bar_index, p618)
+line.set_xy1(l786, bar_index - 1, p786)
+line.set_xy2(l786, bar_index, p786)
+line.set_xy1(l1, bar_index - 1, p1)
+line.set_xy2(l1, bar_index, p1)
+line.set_xy1(l1272, bar_index - 1, p1272)
+line.set_xy2(l1272, bar_index, p1272)
+line.set_xy1(l1618, bar_index - 1, p1618)
+line.set_xy2(l1618, bar_index, p1618)
+
+var label b0 = label.new(na, na, "", style=label.style_label_right, color=color.new(c0, 100), textcolor=c0, size=size.small)
+var label b236 = label.new(na, na, "", style=label.style_label_right, color=color.new(c236, 100), textcolor=c236, size=size.small)
+var label b382 = label.new(na, na, "", style=label.style_label_right, color=color.new(c382, 100), textcolor=c382, size=size.small)
+var label b5 = label.new(na, na, "", style=label.style_label_right, color=color.new(c5, 100), textcolor=c5, size=size.small)
+var label b618 = label.new(na, na, "", style=label.style_label_right, color=color.new(c618, 100), textcolor=c618, size=size.small)
+var label b786 = label.new(na, na, "", style=label.style_label_right, color=color.new(c786, 100), textcolor=c786, size=size.small)
+var label b1 = label.new(na, na, "", style=label.style_label_right, color=color.new(c1, 100), textcolor=c1, size=size.small)
+var label b1272 = label.new(na, na, "", style=label.style_label_right, color=color.new(ce1272, 100), textcolor=ce1272, size=size.small)
+var label b1618 = label.new(na, na, "", style=label.style_label_right, color=color.new(ce1618, 100), textcolor=ce1618, size=size.small)
+
+label.set_xy(b0, bar_index, p0)
+label.set_text(b0, showLbl and not na(p0) ? "0.0  (" + str.tostring(p0, format.mintick) + ")" : "")
+label.set_xy(b236, bar_index, p236)
+label.set_text(b236, showLbl and not na(p236) ? "0.236  (" + str.tostring(p236, format.mintick) + ")" : "")
+label.set_xy(b382, bar_index, p382)
+label.set_text(b382, showLbl and not na(p382) ? "0.382  (" + str.tostring(p382, format.mintick) + ")" : "")
+label.set_xy(b5, bar_index, p5)
+label.set_text(b5, showLbl and not na(p5) ? "0.5  (" + str.tostring(p5, format.mintick) + ")" : "")
+label.set_xy(b618, bar_index, p618)
+label.set_text(b618, showLbl and not na(p618) ? "0.618  (" + str.tostring(p618, format.mintick) + ")" : "")
+label.set_xy(b786, bar_index, p786)
+label.set_text(b786, showLbl and not na(p786) ? "0.786  (" + str.tostring(p786, format.mintick) + ")" : "")
+label.set_xy(b1, bar_index, p1)
+label.set_text(b1, showLbl and not na(p1) ? "1.0  (" + str.tostring(p1, format.mintick) + ")" : "")
+label.set_xy(b1272, bar_index, p1272)
+label.set_text(b1272, showLbl and not na(p1272) ? "1.272  (" + str.tostring(p1272, format.mintick) + ")" : "")
+label.set_xy(b1618, bar_index, p1618)
+label.set_text(b1618, showLbl and not na(p1618) ? "1.618  (" + str.tostring(p1618, format.mintick) + ")" : "")
+
+gzT = showGold and not na(rng) ? hi - rng * 0.618 : na
+gzB = showGold and not na(rng) ? hi - rng * 0.786 : na
+var box gz = box.new(na, na, na, na, extend=extend.both, bgcolor=color.new(goldCol, 85), border_color=color.new(goldCol, 60))
+box.set_top(gz, gzT)
+box.set_bottom(gz, gzB)
+box.set_left(gz, bar_index - 1)
+box.set_right(gz, bar_index)
