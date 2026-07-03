@@ -66,7 +66,7 @@ lastPL := na(pl) ? lastPL : pl
 lastPLb := na(pl) ? lastPLb : bar_index - pivotLen
 
 emaVal = ta.ema(close, emaLen)
-autoUp = (not na(lastPHb) and not na(lastPLb)) ? lastPHb > lastPLb : na
+autoUp = lastPHb > lastPLb
 curUp = dirMode == "Manual Up" ? true : dirMode == "Manual Down" ? false : dirMode == "EMA Filter" ? close > emaVal : autoUp
 hasAnchor = not na(lastPH) and not na(lastPL) and not na(curUp)
 price0 = curUp ? lastPH : lastPL
