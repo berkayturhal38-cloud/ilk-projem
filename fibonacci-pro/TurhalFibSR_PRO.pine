@@ -12,7 +12,8 @@ dirMode = input.string("Auto", "Direction", options=["Auto", "Up", "Down"], grou
 
 gv = "Style"
 theme = input.string("Dark", "Theme", options=["Dark", "Light"], group=gv)
-extBoth = input.bool(true, "Extend Both Sides (full width)", group=gv)
+extMode = input.string("Both", "Extend", options=["Both", "Right", "Left"], group=gv)
+reverse = input.bool(false, "Reverse (Karsit)", group=gv)
 lineW = input.int(1, "Level Line Width", minval=1, maxval=4, group=gv)
 showFill = input.bool(true, "Fill Zones", group=gv)
 fillT = input.int(85, "Zone Transparency", minval=50, maxval=98, group=gv)
@@ -23,7 +24,7 @@ showMarkers = input.bool(true, "Show Swing H/L Markers", group=gv)
 hlBg = input.bool(true, "Highlight Golden Zone Background", group=gv)
 
 gl = "Levels"
-showExt = input.bool(true, "Show Extensions (1.272 / 1.618 / 2.618)", group=gl)
+showExt = input.bool(true, "Show Extensions (1.272 ... 2.618)", group=gl)
 
 gc = "Colors"
 c0 = input.color(#787b86, "0.0", group=gc)
@@ -47,7 +48,7 @@ tblPos = input.string("Top Right", "Position", options=["Top Right", "Top Left",
 
 pTxt = theme == "Light" ? color.black : color.white
 pBg = theme == "Light" ? color.new(color.gray, 75) : color.new(color.black, 20)
-extV = extBoth ? extend.both : extend.right
+extV = extMode == "Left" ? extend.left : extMode == "Right" ? extend.right : extend.both
 
 hh = ta.highest(high, swingLook)
 ll = ta.lowest(low, swingLook)
@@ -58,8 +59,9 @@ mHi = isManual ? math.max(manualHigh, manualLow) : hh
 mLo = isManual ? math.min(manualHigh, manualLow) : ll
 autoUp = isManual ? true : hhBar > llBar
 up = dirMode == "Up" ? true : dirMode == "Down" ? false : autoUp
-aa = up ? mHi : mLo
-bb = up ? mLo : mHi
+hi0 = up != reverse
+aa = hi0 ? mHi : mLo
+bb = hi0 ? mLo : mHi
 rng = bb - aa
 hasData = not na(aa) and not na(bb) and rng != 0
 lx1 = bar_index - 1
@@ -81,7 +83,9 @@ lp618 = hasData ? aa + rng * 0.618 : na
 lp786 = hasData ? aa + rng * 0.786 : na
 lp1 = hasData ? aa + rng * 1.0 : na
 le1272 = hasData and showExt ? aa + rng * 1.272 : na
+le1414 = hasData and showExt ? aa + rng * 1.414 : na
 le1618 = hasData and showExt ? aa + rng * 1.618 : na
+le200 = hasData and showExt ? aa + rng * 2.0 : na
 le2618 = hasData and showExt ? aa + rng * 2.618 : na
 
 var box z1 = box.new(na, na, na, na, border_color=color.new(color.gray, 100))
@@ -138,6 +142,8 @@ var line l1 = line.new(na, na, na, na, color=c1, width=lineW)
 var line le1 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
 var line le2 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
 var line le3 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line le4 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line le5 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
 
 line.set_extend(l0, extV)
 line.set_xy1(l0, lx1, lp0)
@@ -164,11 +170,17 @@ line.set_extend(le1, extV)
 line.set_xy1(le1, lx1, le1272)
 line.set_xy2(le1, lx2, le1272)
 line.set_extend(le2, extV)
-line.set_xy1(le2, lx1, le1618)
-line.set_xy2(le2, lx2, le1618)
+line.set_xy1(le2, lx1, le1414)
+line.set_xy2(le2, lx2, le1414)
 line.set_extend(le3, extV)
-line.set_xy1(le3, lx1, le2618)
-line.set_xy2(le3, lx2, le2618)
+line.set_xy1(le3, lx1, le1618)
+line.set_xy2(le3, lx2, le1618)
+line.set_extend(le4, extV)
+line.set_xy1(le4, lx1, le200)
+line.set_xy2(le4, lx2, le200)
+line.set_extend(le5, extV)
+line.set_xy1(le5, lx1, le2618)
+line.set_xy2(le5, lx2, le2618)
 
 var line conn = line.new(na, na, na, na, color=color.new(color.gray, 10), width=1, style=line.style_dashed)
 line.set_xy1(conn, showConnEff ? startBar : na, showConnEff ? bb : na)
@@ -195,6 +207,8 @@ var label b1 = label.new(na, na, "", style=label.style_label_left, color=pBg, te
 var label be1 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=size.small)
 var label be2 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=size.small)
 var label be3 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=size.small)
+var label be4 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=size.small)
+var label be5 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=size.small)
 
 label.set_xy(b0, lbX, lp0)
 label.set_text(b0, showLbl and not na(lp0) ? "0.0  " + str.tostring(lp0, format.mintick) : "")
@@ -212,10 +226,14 @@ label.set_xy(b1, lbX, lp1)
 label.set_text(b1, showLbl and not na(lp1) ? "1.0  " + str.tostring(lp1, format.mintick) : "")
 label.set_xy(be1, lbX, le1272)
 label.set_text(be1, showLbl and not na(le1272) ? "1.272  " + str.tostring(le1272, format.mintick) : "")
-label.set_xy(be2, lbX, le1618)
-label.set_text(be2, showLbl and not na(le1618) ? "1.618  " + str.tostring(le1618, format.mintick) : "")
-label.set_xy(be3, lbX, le2618)
-label.set_text(be3, showLbl and not na(le2618) ? "2.618  " + str.tostring(le2618, format.mintick) : "")
+label.set_xy(be2, lbX, le1414)
+label.set_text(be2, showLbl and not na(le1414) ? "1.414  " + str.tostring(le1414, format.mintick) : "")
+label.set_xy(be3, lbX, le1618)
+label.set_text(be3, showLbl and not na(le1618) ? "1.618  " + str.tostring(le1618, format.mintick) : "")
+label.set_xy(be4, lbX, le200)
+label.set_text(be4, showLbl and not na(le200) ? "2.0  " + str.tostring(le200, format.mintick) : "")
+label.set_xy(be5, lbX, le2618)
+label.set_text(be5, showLbl and not na(le2618) ? "2.618  " + str.tostring(le2618, format.mintick) : "")
 
 var label mkH = label.new(na, na, "", style=label.style_label_down, color=color.new(#f23645, 20), textcolor=color.white, size=size.small)
 var label mkL = label.new(na, na, "", style=label.style_label_up, color=color.new(#4caf50, 20), textcolor=color.white, size=size.small)
