@@ -24,7 +24,8 @@ showMarkers = input.bool(true, "Show Swing H/L Markers", group=gv)
 hlBg = input.bool(true, "Highlight Golden Zone Background", group=gv)
 
 gl = "Levels"
-showExt = input.bool(true, "Show Extensions (1.272 ... 2.618)", group=gl)
+showExt = input.bool(true, "Show Extensions (1.272 ... 4.764)", group=gl)
+showUpper = input.bool(true, "Show Upper Targets (-0.236 ... -1.0)", group=gl)
 
 gc = "Colors"
 c0 = input.color(#787b86, "0.0", group=gc)
@@ -36,6 +37,7 @@ c786 = input.color(#2962ff, "0.786", group=gc)
 c1 = input.color(#787b86, "1.0", group=gc)
 goldCol = input.color(#ffd700, "Golden Zone", group=gc)
 ceCol = input.color(#e91e63, "Extensions", group=gc)
+upCol = input.color(#26a69a, "Upper Targets", group=gc)
 htfCol = input.color(#ffeb3b, "HTF Confluence", group=gc)
 
 gm = "Multi-Timeframe"
@@ -91,6 +93,11 @@ le3618 = hasData and showExt ? aa + rng * 3.618 : na
 le4236 = hasData and showExt ? aa + rng * 4.236 : na
 le4618 = hasData and showExt ? aa + rng * 4.618 : na
 le4764 = hasData and showExt ? aa + rng * 4.764 : na
+um236 = hasData and showUpper ? aa + rng * -0.236 : na
+um382 = hasData and showUpper ? aa + rng * -0.382 : na
+um5 = hasData and showUpper ? aa + rng * -0.5 : na
+um618 = hasData and showUpper ? aa + rng * -0.618 : na
+um1 = hasData and showUpper ? aa + rng * -1.0 : na
 
 var box z1 = box.new(na, na, na, na, border_color=color.new(color.gray, 100))
 var box z2 = box.new(na, na, na, na, border_color=color.new(color.gray, 100))
@@ -152,6 +159,11 @@ var line le6 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.sty
 var line le7 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
 var line le8 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
 var line le9 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line lu1 = line.new(na, na, na, na, color=upCol, width=lineW, style=line.style_dashed)
+var line lu2 = line.new(na, na, na, na, color=upCol, width=lineW, style=line.style_dashed)
+var line lu3 = line.new(na, na, na, na, color=upCol, width=lineW, style=line.style_dashed)
+var line lu4 = line.new(na, na, na, na, color=upCol, width=lineW, style=line.style_dashed)
+var line lu5 = line.new(na, na, na, na, color=upCol, width=lineW, style=line.style_dashed)
 
 line.set_extend(l0, extV)
 line.set_xy1(l0, lx1, lp0)
@@ -201,6 +213,21 @@ line.set_xy2(le8, lx2, le4618)
 line.set_extend(le9, extV)
 line.set_xy1(le9, lx1, le4764)
 line.set_xy2(le9, lx2, le4764)
+line.set_extend(lu1, extV)
+line.set_xy1(lu1, lx1, um236)
+line.set_xy2(lu1, lx2, um236)
+line.set_extend(lu2, extV)
+line.set_xy1(lu2, lx1, um382)
+line.set_xy2(lu2, lx2, um382)
+line.set_extend(lu3, extV)
+line.set_xy1(lu3, lx1, um5)
+line.set_xy2(lu3, lx2, um5)
+line.set_extend(lu4, extV)
+line.set_xy1(lu4, lx1, um618)
+line.set_xy2(lu4, lx2, um618)
+line.set_extend(lu5, extV)
+line.set_xy1(lu5, lx1, um1)
+line.set_xy2(lu5, lx2, um1)
 
 var line conn = line.new(na, na, na, na, color=color.new(color.gray, 10), width=1, style=line.style_dashed)
 line.set_xy1(conn, showConnEff ? startBar : na, showConnEff ? bb : na)
@@ -233,6 +260,11 @@ var label be6 = label.new(na, na, "", style=label.style_label_left, color=pBg, t
 var label be7 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=size.small)
 var label be8 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=size.small)
 var label be9 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=size.small)
+var label bu1 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=upCol, size=size.small)
+var label bu2 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=upCol, size=size.small)
+var label bu3 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=upCol, size=size.small)
+var label bu4 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=upCol, size=size.small)
+var label bu5 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=upCol, size=size.small)
 
 label.set_xy(b0, lbX, lp0)
 label.set_text(b0, showLbl and not na(lp0) ? "0.0  " + str.tostring(lp0, format.mintick) : "")
@@ -266,6 +298,16 @@ label.set_xy(be8, lbX, le4618)
 label.set_text(be8, showLbl and not na(le4618) ? "4.618  " + str.tostring(le4618, format.mintick) : "")
 label.set_xy(be9, lbX, le4764)
 label.set_text(be9, showLbl and not na(le4764) ? "4.764  " + str.tostring(le4764, format.mintick) : "")
+label.set_xy(bu1, lbX, um236)
+label.set_text(bu1, showLbl and not na(um236) ? "-0.236  " + str.tostring(um236, format.mintick) : "")
+label.set_xy(bu2, lbX, um382)
+label.set_text(bu2, showLbl and not na(um382) ? "-0.382  " + str.tostring(um382, format.mintick) : "")
+label.set_xy(bu3, lbX, um5)
+label.set_text(bu3, showLbl and not na(um5) ? "-0.5  " + str.tostring(um5, format.mintick) : "")
+label.set_xy(bu4, lbX, um618)
+label.set_text(bu4, showLbl and not na(um618) ? "-0.618  " + str.tostring(um618, format.mintick) : "")
+label.set_xy(bu5, lbX, um1)
+label.set_text(bu5, showLbl and not na(um1) ? "-1.0  " + str.tostring(um1, format.mintick) : "")
 
 var label mkH = label.new(na, na, "", style=label.style_label_down, color=color.new(#f23645, 20), textcolor=color.white, size=size.small)
 var label mkL = label.new(na, na, "", style=label.style_label_up, color=color.new(#4caf50, 20), textcolor=color.white, size=size.small)
@@ -275,11 +317,12 @@ label.set_xy(mkL, lowBar, showMarkEff ? ll : na)
 label.set_text(mkL, showMarkEff and not na(ll) ? "L" : "")
 
 posPct = hasData ? (close - aa) / rng * 100 : na
+rr = hasData and (lp618 - lp1) != 0 ? math.abs(lp0 - lp618) / math.abs(lp618 - lp1) : na
 zoneTxt = not hasData ? "-" : posPct < 0 ? "Above 0%" : posPct < 23.6 ? "0 - 0.236" : posPct < 38.2 ? "0.236 - 0.382" : posPct < 50 ? "0.382 - 0.5" : posPct < 61.8 ? "0.5 - 0.618" : posPct < 78.6 ? "GOLDEN ZONE" : posPct <= 100 ? "0.786 - 1.0" : "Below 100%"
 dirTxt = not hasData ? "-" : up ? "UP" : "DOWN"
 dirBg = not hasData ? color.gray : up ? color.new(color.green, 55) : color.new(color.red, 55)
 tblP = tblPos == "Top Left" ? position.top_left : tblPos == "Bottom Right" ? position.bottom_right : tblPos == "Bottom Left" ? position.bottom_left : position.top_right
-var table dash = table.new(tblP, 2, 5, border_width=1, frame_color=color.new(color.gray, 40), frame_width=1)
+var table dash = table.new(tblP, 2, 6, border_width=1, frame_color=color.new(color.gray, 40), frame_width=1)
 table.cell(dash, 0, 0, "Turhal Fib", text_color=pTxt, bgcolor=pBg, text_size=size.small)
 table.cell(dash, 1, 0, showTable ? dirTxt : "", text_color=color.white, bgcolor=dirBg, text_size=size.small)
 table.cell(dash, 0, 1, showTable ? "0%" : "", text_color=pTxt, bgcolor=pBg, text_size=size.tiny)
@@ -290,6 +333,8 @@ table.cell(dash, 0, 3, showTable ? "Retr %" : "", text_color=pTxt, bgcolor=pBg, 
 table.cell(dash, 1, 3, showTable and not na(posPct) ? str.tostring(posPct, "0.0") + " %" : "", text_color=pTxt, bgcolor=pBg, text_size=size.tiny)
 table.cell(dash, 0, 4, showTable ? "Zone" : "", text_color=pTxt, bgcolor=pBg, text_size=size.tiny)
 table.cell(dash, 1, 4, showTable ? zoneTxt : "", text_color=pTxt, bgcolor=zoneTxt == "GOLDEN ZONE" ? color.new(goldCol, 40) : pBg, text_size=size.tiny)
+table.cell(dash, 0, 5, showTable ? "R/R 0.618" : "", text_color=pTxt, bgcolor=pBg, text_size=size.tiny)
+table.cell(dash, 1, 5, showTable and not na(rr) ? "1 : " + str.tostring(rr, "0.00") : "", text_color=pTxt, bgcolor=not na(rr) and rr >= 2 ? color.new(color.green, 50) : pBg, text_size=size.tiny)
 
 gLo = math.min(lp618, lp786)
 gHi = math.max(lp618, lp786)
