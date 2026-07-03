@@ -1,16 +1,20 @@
 //@version=6
-// Turhal Fibonacci S/R PRO (flat / mobile-safe)
-// Fibonacci levels drawn as thick full-width support/resistance lines.
+// Turhal Auto Fibonacci PRO (flat / mobile-safe)
+// Classic-look auto fibonacci: trend-aware swing, proportional levels,
+// colored zone fills, golden zone, connector line, labels & alerts.
 // Author: berkayturhal38 | License: MPL-2.0
-indicator("Turhal Fibonacci S/R PRO", "Turhal Fib S/R", overlay=true, max_lines_count=50, max_labels_count=50, max_boxes_count=10)
+indicator("Turhal Auto Fibonacci PRO", "Turhal Fib", overlay=true, max_lines_count=40, max_labels_count=40, max_boxes_count=20)
 
-g = "Settings"
-pivotLen = input.int(15, "Swing Sensitivity", minval=1, maxval=200, group=g)
-wid = input.int(2, "Line Width", minval=1, maxval=5, group=g)
-showLbl = input.bool(true, "Show Price Labels", group=g)
-showRetr = input.bool(true, "Show Retracements", group=g)
-showExt = input.bool(true, "Show Extensions", group=g)
-showGold = input.bool(true, "Show Golden Zone", group=g)
+g = "Swing / Trend"
+swingLook = input.int(60, "Swing Lookback", minval=5, maxval=500, group=g)
+dirMode = input.string("Auto", "Direction", options=["Auto", "Up", "Down"], group=g)
+
+gv = "Style"
+lineW = input.int(1, "Level Line Width", minval=1, maxval=4, group=gv)
+showFill = input.bool(true, "Fill Zones", group=gv)
+fillT = input.int(88, "Zone Transparency", minval=50, maxval=98, group=gv)
+showConn = input.bool(true, "Show Connector Line", group=gv)
+showLbl = input.bool(true, "Show Labels", group=gv)
 
 gc = "Colors"
 c0 = input.color(#787b86, "0.0", group=gc)
@@ -20,90 +24,142 @@ c5 = input.color(#4caf50, "0.5", group=gc)
 c618 = input.color(#00bcd4, "0.618", group=gc)
 c786 = input.color(#2962ff, "0.786", group=gc)
 c1 = input.color(#787b86, "1.0", group=gc)
-ce1272 = input.color(#9c27b0, "1.272", group=gc)
-ce1618 = input.color(#e91e63, "1.618", group=gc)
 goldCol = input.color(#ffd700, "Golden Zone", group=gc)
 
-ph = ta.pivothigh(pivotLen, pivotLen)
-pl = ta.pivotlow(pivotLen, pivotLen)
-var float hi = na
-var float lo = na
-hi := na(ph) ? hi : ph
-lo := na(pl) ? lo : pl
-rng = hi - lo
+gt = "Info Panel"
+showTable = input.bool(true, "Show Panel", group=gt)
+tblPos = input.string("Top Right", "Position", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group=gt)
 
-p0 = showRetr ? hi - rng * 0.0 : na
-p236 = showRetr ? hi - rng * 0.236 : na
-p382 = showRetr ? hi - rng * 0.382 : na
-p5 = showRetr ? hi - rng * 0.5 : na
-p618 = showRetr ? hi - rng * 0.618 : na
-p786 = showRetr ? hi - rng * 0.786 : na
-p1 = showRetr ? hi - rng * 1.0 : na
-p1272 = showExt ? hi - rng * 1.272 : na
-p1618 = showExt ? hi - rng * 1.618 : na
+hh = ta.highest(high, swingLook)
+ll = ta.lowest(low, swingLook)
+hhBar = ta.highestbars(high, swingLook)
+llBar = ta.lowestbars(low, swingLook)
+autoUp = hhBar > llBar
+up = dirMode == "Up" ? true : dirMode == "Down" ? false : autoUp
+aa = up ? hh : ll
+bb = up ? ll : hh
+rng = bb - aa
+hasData = not na(aa) and not na(bb) and rng != 0
+leftX = bar_index + math.min(hhBar, llBar)
+startBar = up ? bar_index + llBar : bar_index + hhBar
+endBar = up ? bar_index + hhBar : bar_index + llBar
 
-var line l0 = line.new(na, na, na, na, extend=extend.both, color=c0, width=wid)
-var line l236 = line.new(na, na, na, na, extend=extend.both, color=c236, width=wid)
-var line l382 = line.new(na, na, na, na, extend=extend.both, color=c382, width=wid)
-var line l5 = line.new(na, na, na, na, extend=extend.both, color=c5, width=wid)
-var line l618 = line.new(na, na, na, na, extend=extend.both, color=c618, width=wid)
-var line l786 = line.new(na, na, na, na, extend=extend.both, color=c786, width=wid)
-var line l1 = line.new(na, na, na, na, extend=extend.both, color=c1, width=wid)
-var line l1272 = line.new(na, na, na, na, extend=extend.both, color=ce1272, width=wid)
-var line l1618 = line.new(na, na, na, na, extend=extend.both, color=ce1618, width=wid)
+lp0 = hasData ? aa + rng * 0.0 : na
+lp236 = hasData ? aa + rng * 0.236 : na
+lp382 = hasData ? aa + rng * 0.382 : na
+lp5 = hasData ? aa + rng * 0.5 : na
+lp618 = hasData ? aa + rng * 0.618 : na
+lp786 = hasData ? aa + rng * 0.786 : na
+lp1 = hasData ? aa + rng * 1.0 : na
 
-line.set_xy1(l0, bar_index - 1, p0)
-line.set_xy2(l0, bar_index, p0)
-line.set_xy1(l236, bar_index - 1, p236)
-line.set_xy2(l236, bar_index, p236)
-line.set_xy1(l382, bar_index - 1, p382)
-line.set_xy2(l382, bar_index, p382)
-line.set_xy1(l5, bar_index - 1, p5)
-line.set_xy2(l5, bar_index, p5)
-line.set_xy1(l618, bar_index - 1, p618)
-line.set_xy2(l618, bar_index, p618)
-line.set_xy1(l786, bar_index - 1, p786)
-line.set_xy2(l786, bar_index, p786)
-line.set_xy1(l1, bar_index - 1, p1)
-line.set_xy2(l1, bar_index, p1)
-line.set_xy1(l1272, bar_index - 1, p1272)
-line.set_xy2(l1272, bar_index, p1272)
-line.set_xy1(l1618, bar_index - 1, p1618)
-line.set_xy2(l1618, bar_index, p1618)
+var box z1 = box.new(na, na, na, na, extend=extend.right, border_color=color.new(color.gray, 100))
+var box z2 = box.new(na, na, na, na, extend=extend.right, border_color=color.new(color.gray, 100))
+var box z3 = box.new(na, na, na, na, extend=extend.right, border_color=color.new(color.gray, 100))
+var box z4 = box.new(na, na, na, na, extend=extend.right, border_color=color.new(color.gray, 100))
+var box z5 = box.new(na, na, na, na, extend=extend.right, border_color=color.new(color.gray, 100))
+var box z6 = box.new(na, na, na, na, extend=extend.right, border_color=color.new(color.gray, 100))
 
-var label b0 = label.new(na, na, "", style=label.style_label_right, color=color.new(c0, 100), textcolor=c0, size=size.small)
-var label b236 = label.new(na, na, "", style=label.style_label_right, color=color.new(c236, 100), textcolor=c236, size=size.small)
-var label b382 = label.new(na, na, "", style=label.style_label_right, color=color.new(c382, 100), textcolor=c382, size=size.small)
-var label b5 = label.new(na, na, "", style=label.style_label_right, color=color.new(c5, 100), textcolor=c5, size=size.small)
-var label b618 = label.new(na, na, "", style=label.style_label_right, color=color.new(c618, 100), textcolor=c618, size=size.small)
-var label b786 = label.new(na, na, "", style=label.style_label_right, color=color.new(c786, 100), textcolor=c786, size=size.small)
-var label b1 = label.new(na, na, "", style=label.style_label_right, color=color.new(c1, 100), textcolor=c1, size=size.small)
-var label b1272 = label.new(na, na, "", style=label.style_label_right, color=color.new(ce1272, 100), textcolor=ce1272, size=size.small)
-var label b1618 = label.new(na, na, "", style=label.style_label_right, color=color.new(ce1618, 100), textcolor=ce1618, size=size.small)
+box.set_top(z1, showFill ? math.max(lp0, lp236) : na)
+box.set_bottom(z1, showFill ? math.min(lp0, lp236) : na)
+box.set_left(z1, leftX)
+box.set_right(z1, bar_index)
+box.set_bgcolor(z1, color.new(c236, fillT))
+box.set_top(z2, showFill ? math.max(lp236, lp382) : na)
+box.set_bottom(z2, showFill ? math.min(lp236, lp382) : na)
+box.set_left(z2, leftX)
+box.set_right(z2, bar_index)
+box.set_bgcolor(z2, color.new(c382, fillT))
+box.set_top(z3, showFill ? math.max(lp382, lp5) : na)
+box.set_bottom(z3, showFill ? math.min(lp382, lp5) : na)
+box.set_left(z3, leftX)
+box.set_right(z3, bar_index)
+box.set_bgcolor(z3, color.new(c5, fillT))
+box.set_top(z4, showFill ? math.max(lp5, lp618) : na)
+box.set_bottom(z4, showFill ? math.min(lp5, lp618) : na)
+box.set_left(z4, leftX)
+box.set_right(z4, bar_index)
+box.set_bgcolor(z4, color.new(c618, fillT))
+box.set_top(z5, showFill ? math.max(lp618, lp786) : na)
+box.set_bottom(z5, showFill ? math.min(lp618, lp786) : na)
+box.set_left(z5, leftX)
+box.set_right(z5, bar_index)
+box.set_bgcolor(z5, color.new(goldCol, fillT - 20 < 50 ? 50 : fillT - 20))
+box.set_top(z6, showFill ? math.max(lp786, lp1) : na)
+box.set_bottom(z6, showFill ? math.min(lp786, lp1) : na)
+box.set_left(z6, leftX)
+box.set_right(z6, bar_index)
+box.set_bgcolor(z6, color.new(c1, fillT))
 
-label.set_xy(b0, bar_index, p0)
-label.set_text(b0, showLbl and not na(p0) ? "0.0  (" + str.tostring(p0, format.mintick) + ")" : "")
-label.set_xy(b236, bar_index, p236)
-label.set_text(b236, showLbl and not na(p236) ? "0.236  (" + str.tostring(p236, format.mintick) + ")" : "")
-label.set_xy(b382, bar_index, p382)
-label.set_text(b382, showLbl and not na(p382) ? "0.382  (" + str.tostring(p382, format.mintick) + ")" : "")
-label.set_xy(b5, bar_index, p5)
-label.set_text(b5, showLbl and not na(p5) ? "0.5  (" + str.tostring(p5, format.mintick) + ")" : "")
-label.set_xy(b618, bar_index, p618)
-label.set_text(b618, showLbl and not na(p618) ? "0.618  (" + str.tostring(p618, format.mintick) + ")" : "")
-label.set_xy(b786, bar_index, p786)
-label.set_text(b786, showLbl and not na(p786) ? "0.786  (" + str.tostring(p786, format.mintick) + ")" : "")
-label.set_xy(b1, bar_index, p1)
-label.set_text(b1, showLbl and not na(p1) ? "1.0  (" + str.tostring(p1, format.mintick) + ")" : "")
-label.set_xy(b1272, bar_index, p1272)
-label.set_text(b1272, showLbl and not na(p1272) ? "1.272  (" + str.tostring(p1272, format.mintick) + ")" : "")
-label.set_xy(b1618, bar_index, p1618)
-label.set_text(b1618, showLbl and not na(p1618) ? "1.618  (" + str.tostring(p1618, format.mintick) + ")" : "")
+var line l0 = line.new(na, na, na, na, extend=extend.right, color=c0, width=lineW)
+var line l236 = line.new(na, na, na, na, extend=extend.right, color=c236, width=lineW)
+var line l382 = line.new(na, na, na, na, extend=extend.right, color=c382, width=lineW)
+var line l5 = line.new(na, na, na, na, extend=extend.right, color=c5, width=lineW)
+var line l618 = line.new(na, na, na, na, extend=extend.right, color=c618, width=lineW)
+var line l786 = line.new(na, na, na, na, extend=extend.right, color=c786, width=lineW)
+var line l1 = line.new(na, na, na, na, extend=extend.right, color=c1, width=lineW)
 
-gzT = showGold and not na(rng) ? hi - rng * 0.618 : na
-gzB = showGold and not na(rng) ? hi - rng * 0.786 : na
-var box gz = box.new(na, na, na, na, extend=extend.both, bgcolor=color.new(goldCol, 85), border_color=color.new(goldCol, 60))
-box.set_top(gz, gzT)
-box.set_bottom(gz, gzB)
-box.set_left(gz, bar_index - 1)
-box.set_right(gz, bar_index)
+line.set_xy1(l0, leftX, lp0)
+line.set_xy2(l0, bar_index, lp0)
+line.set_xy1(l236, leftX, lp236)
+line.set_xy2(l236, bar_index, lp236)
+line.set_xy1(l382, leftX, lp382)
+line.set_xy2(l382, bar_index, lp382)
+line.set_xy1(l5, leftX, lp5)
+line.set_xy2(l5, bar_index, lp5)
+line.set_xy1(l618, leftX, lp618)
+line.set_xy2(l618, bar_index, lp618)
+line.set_xy1(l786, leftX, lp786)
+line.set_xy2(l786, bar_index, lp786)
+line.set_xy1(l1, leftX, lp1)
+line.set_xy2(l1, bar_index, lp1)
+
+var line conn = line.new(na, na, na, na, color=color.new(color.gray, 20), width=1, style=line.style_dashed)
+line.set_xy1(conn, showConn ? startBar : na, showConn ? bb : na)
+line.set_xy2(conn, showConn ? endBar : na, showConn ? aa : na)
+
+var label b0 = label.new(na, na, "", style=label.style_label_left, color=color.new(c0, 100), textcolor=c0, size=size.small)
+var label b236 = label.new(na, na, "", style=label.style_label_left, color=color.new(c236, 100), textcolor=c236, size=size.small)
+var label b382 = label.new(na, na, "", style=label.style_label_left, color=color.new(c382, 100), textcolor=c382, size=size.small)
+var label b5 = label.new(na, na, "", style=label.style_label_left, color=color.new(c5, 100), textcolor=c5, size=size.small)
+var label b618 = label.new(na, na, "", style=label.style_label_left, color=color.new(c618, 100), textcolor=c618, size=size.small)
+var label b786 = label.new(na, na, "", style=label.style_label_left, color=color.new(c786, 100), textcolor=c786, size=size.small)
+var label b1 = label.new(na, na, "", style=label.style_label_left, color=color.new(c1, 100), textcolor=c1, size=size.small)
+
+label.set_xy(b0, bar_index, lp0)
+label.set_text(b0, showLbl and not na(lp0) ? "0.0  (" + str.tostring(lp0, format.mintick) + ")" : "")
+label.set_xy(b236, bar_index, lp236)
+label.set_text(b236, showLbl and not na(lp236) ? "0.236  (" + str.tostring(lp236, format.mintick) + ")" : "")
+label.set_xy(b382, bar_index, lp382)
+label.set_text(b382, showLbl and not na(lp382) ? "0.382  (" + str.tostring(lp382, format.mintick) + ")" : "")
+label.set_xy(b5, bar_index, lp5)
+label.set_text(b5, showLbl and not na(lp5) ? "0.5  (" + str.tostring(lp5, format.mintick) + ")" : "")
+label.set_xy(b618, bar_index, lp618)
+label.set_text(b618, showLbl and not na(lp618) ? "0.618  (" + str.tostring(lp618, format.mintick) + ")" : "")
+label.set_xy(b786, bar_index, lp786)
+label.set_text(b786, showLbl and not na(lp786) ? "0.786  (" + str.tostring(lp786, format.mintick) + ")" : "")
+label.set_xy(b1, bar_index, lp1)
+label.set_text(b1, showLbl and not na(lp1) ? "1.0  (" + str.tostring(lp1, format.mintick) + ")" : "")
+
+posPct = hasData ? (close - aa) / rng * 100 : na
+dirTxt = not hasData ? "-" : up ? "UP" : "DOWN"
+dirBg = not hasData ? color.gray : up ? color.new(color.green, 55) : color.new(color.red, 55)
+tblP = tblPos == "Top Left" ? position.top_left : tblPos == "Bottom Right" ? position.bottom_right : tblPos == "Bottom Left" ? position.bottom_left : position.top_right
+var table dash = table.new(tblP, 2, 4, border_width=1, frame_color=color.new(color.gray, 40), frame_width=1)
+table.cell(dash, 0, 0, "Turhal Fib", text_color=color.white, bgcolor=color.new(color.black, 20), text_size=size.small)
+table.cell(dash, 1, 0, showTable ? dirTxt : "", text_color=color.white, bgcolor=dirBg, text_size=size.small)
+table.cell(dash, 0, 1, showTable ? "0%" : "", text_color=color.white, bgcolor=color.new(color.black, 20), text_size=size.tiny)
+table.cell(dash, 1, 1, showTable and not na(aa) ? str.tostring(aa, format.mintick) : "", text_color=color.white, bgcolor=color.new(color.black, 20), text_size=size.tiny)
+table.cell(dash, 0, 2, showTable ? "100%" : "", text_color=color.white, bgcolor=color.new(color.black, 20), text_size=size.tiny)
+table.cell(dash, 1, 2, showTable and not na(bb) ? str.tostring(bb, format.mintick) : "", text_color=color.white, bgcolor=color.new(color.black, 20), text_size=size.tiny)
+table.cell(dash, 0, 3, showTable ? "Retr %" : "", text_color=color.white, bgcolor=color.new(color.black, 20), text_size=size.tiny)
+table.cell(dash, 1, 3, showTable and not na(posPct) ? str.tostring(posPct, "0.0") + " %" : "", text_color=color.white, bgcolor=color.new(color.black, 20), text_size=size.tiny)
+
+gLo = math.min(lp618, lp786)
+gHi = math.max(lp618, lp786)
+inGold = hasData and close <= gHi and close >= gLo
+goldEntry = inGold and not inGold[1]
+touch618 = hasData and low <= lp618 and high >= lp618
+broke100 = hasData and (ta.crossover(close, bb) or ta.crossunder(close, bb))
+alertcondition(goldEntry, "Golden Zone Entry", "Turhal Fib: price entered the Golden Zone")
+alertcondition(touch618, "Touch 0.618", "Turhal Fib: price touched the 0.618 level")
+alertcondition(broke100, "Broke 100% Level", "Turhal Fib: price broke the 100% level")
