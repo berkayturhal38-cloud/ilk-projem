@@ -87,6 +87,10 @@ le1414 = hasData and showExt ? aa + rng * 1.414 : na
 le1618 = hasData and showExt ? aa + rng * 1.618 : na
 le200 = hasData and showExt ? aa + rng * 2.0 : na
 le2618 = hasData and showExt ? aa + rng * 2.618 : na
+le3618 = hasData and showExt ? aa + rng * 3.618 : na
+le4236 = hasData and showExt ? aa + rng * 4.236 : na
+le4618 = hasData and showExt ? aa + rng * 4.618 : na
+le4764 = hasData and showExt ? aa + rng * 4.764 : na
 
 var box z1 = box.new(na, na, na, na, border_color=color.new(color.gray, 100))
 var box z2 = box.new(na, na, na, na, border_color=color.new(color.gray, 100))
@@ -144,6 +148,10 @@ var line le2 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.sty
 var line le3 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
 var line le4 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
 var line le5 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line le6 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line le7 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line le8 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line le9 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
 
 line.set_extend(l0, extV)
 line.set_xy1(l0, lx1, lp0)
@@ -181,6 +189,18 @@ line.set_xy2(le4, lx2, le200)
 line.set_extend(le5, extV)
 line.set_xy1(le5, lx1, le2618)
 line.set_xy2(le5, lx2, le2618)
+line.set_extend(le6, extV)
+line.set_xy1(le6, lx1, le3618)
+line.set_xy2(le6, lx2, le3618)
+line.set_extend(le7, extV)
+line.set_xy1(le7, lx1, le4236)
+line.set_xy2(le7, lx2, le4236)
+line.set_extend(le8, extV)
+line.set_xy1(le8, lx1, le4618)
+line.set_xy2(le8, lx2, le4618)
+line.set_extend(le9, extV)
+line.set_xy1(le9, lx1, le4764)
+line.set_xy2(le9, lx2, le4764)
 
 var line conn = line.new(na, na, na, na, color=color.new(color.gray, 10), width=1, style=line.style_dashed)
 line.set_xy1(conn, showConnEff ? startBar : na, showConnEff ? bb : na)
@@ -209,6 +229,10 @@ var label be2 = label.new(na, na, "", style=label.style_label_left, color=pBg, t
 var label be3 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=size.small)
 var label be4 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=size.small)
 var label be5 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=size.small)
+var label be6 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=size.small)
+var label be7 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=size.small)
+var label be8 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=size.small)
+var label be9 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=size.small)
 
 label.set_xy(b0, lbX, lp0)
 label.set_text(b0, showLbl and not na(lp0) ? "0.0  " + str.tostring(lp0, format.mintick) : "")
@@ -234,6 +258,14 @@ label.set_xy(be4, lbX, le200)
 label.set_text(be4, showLbl and not na(le200) ? "2.0  " + str.tostring(le200, format.mintick) : "")
 label.set_xy(be5, lbX, le2618)
 label.set_text(be5, showLbl and not na(le2618) ? "2.618  " + str.tostring(le2618, format.mintick) : "")
+label.set_xy(be6, lbX, le3618)
+label.set_text(be6, showLbl and not na(le3618) ? "3.618  " + str.tostring(le3618, format.mintick) : "")
+label.set_xy(be7, lbX, le4236)
+label.set_text(be7, showLbl and not na(le4236) ? "4.236  " + str.tostring(le4236, format.mintick) : "")
+label.set_xy(be8, lbX, le4618)
+label.set_text(be8, showLbl and not na(le4618) ? "4.618  " + str.tostring(le4618, format.mintick) : "")
+label.set_xy(be9, lbX, le4764)
+label.set_text(be9, showLbl and not na(le4764) ? "4.764  " + str.tostring(le4764, format.mintick) : "")
 
 var label mkH = label.new(na, na, "", style=label.style_label_down, color=color.new(#f23645, 20), textcolor=color.white, size=size.small)
 var label mkL = label.new(na, na, "", style=label.style_label_up, color=color.new(#4caf50, 20), textcolor=color.white, size=size.small)
