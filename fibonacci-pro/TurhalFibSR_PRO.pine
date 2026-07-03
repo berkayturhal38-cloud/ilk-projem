@@ -4,11 +4,15 @@
 indicator("Turhal Auto Fibonacci PRO", "Turhal Fib", overlay=true, max_lines_count=60, max_labels_count=60, max_boxes_count=20)
 
 g = "Swing / Trend"
-swingLook = input.int(60, "Swing Lookback", minval=5, maxval=500, group=g)
+swingMode = input.string("Auto", "Swing Mode", options=["Auto", "Manual"], group=g, tooltip="Manual: set the high/low prices yourself (drag them on the chart).")
+manualHigh = input.price(100.0, "Manual High", group=g, confirm=true)
+manualLow = input.price(50.0, "Manual Low", group=g, confirm=true)
+swingLook = input.int(60, "Swing Lookback (Auto)", minval=5, maxval=500, group=g)
 dirMode = input.string("Auto", "Direction", options=["Auto", "Up", "Down"], group=g)
 
 gv = "Style"
 theme = input.string("Dark", "Theme", options=["Dark", "Light"], group=gv)
+extBoth = input.bool(true, "Extend Both Sides (full width)", group=gv)
 lineW = input.int(1, "Level Line Width", minval=1, maxval=4, group=gv)
 showFill = input.bool(true, "Fill Zones", group=gv)
 fillT = input.int(85, "Zone Transparency", minval=50, maxval=98, group=gv)
@@ -43,24 +47,31 @@ tblPos = input.string("Top Right", "Position", options=["Top Right", "Top Left",
 
 pTxt = theme == "Light" ? color.black : color.white
 pBg = theme == "Light" ? color.new(color.gray, 75) : color.new(color.black, 20)
+extV = extBoth ? extend.both : extend.right
 
 hh = ta.highest(high, swingLook)
 ll = ta.lowest(low, swingLook)
 hhBar = ta.highestbars(high, swingLook)
 llBar = ta.lowestbars(low, swingLook)
-autoUp = hhBar > llBar
+isManual = swingMode == "Manual"
+mHi = isManual ? math.max(manualHigh, manualLow) : hh
+mLo = isManual ? math.min(manualHigh, manualLow) : ll
+autoUp = isManual ? true : hhBar > llBar
 up = dirMode == "Up" ? true : dirMode == "Down" ? false : autoUp
-aa = up ? hh : ll
-bb = up ? ll : hh
+aa = up ? mHi : mLo
+bb = up ? mLo : mHi
 rng = bb - aa
 hasData = not na(aa) and not na(bb) and rng != 0
-leftX = hhBar < llBar ? bar_index + hhBar : bar_index + llBar
+lx1 = bar_index - 1
+lx2 = bar_index
 startBar = up ? bar_index + llBar : bar_index + hhBar
 endBar = up ? bar_index + hhBar : bar_index + llBar
 highBar = bar_index + hhBar
 lowBar = bar_index + llBar
 lbX = bar_index + labelOff
 goldT = fillT - 25 < 45 ? 45 : fillT - 25
+showConnEff = showConn and not isManual
+showMarkEff = showMarkers and not isManual
 
 lp0 = hasData ? aa + rng * 0.0 : na
 lp236 = hasData ? aa + rng * 0.236 : na
@@ -73,79 +84,95 @@ le1272 = hasData and showExt ? aa + rng * 1.272 : na
 le1618 = hasData and showExt ? aa + rng * 1.618 : na
 le2618 = hasData and showExt ? aa + rng * 2.618 : na
 
-var box z1 = box.new(na, na, na, na, extend=extend.right, border_color=color.new(color.gray, 100))
-var box z2 = box.new(na, na, na, na, extend=extend.right, border_color=color.new(color.gray, 100))
-var box z3 = box.new(na, na, na, na, extend=extend.right, border_color=color.new(color.gray, 100))
-var box z4 = box.new(na, na, na, na, extend=extend.right, border_color=color.new(color.gray, 100))
-var box z5 = box.new(na, na, na, na, extend=extend.right, border_color=color.new(color.gray, 100))
-var box z6 = box.new(na, na, na, na, extend=extend.right, border_color=color.new(color.gray, 100))
+var box z1 = box.new(na, na, na, na, border_color=color.new(color.gray, 100))
+var box z2 = box.new(na, na, na, na, border_color=color.new(color.gray, 100))
+var box z3 = box.new(na, na, na, na, border_color=color.new(color.gray, 100))
+var box z4 = box.new(na, na, na, na, border_color=color.new(color.gray, 100))
+var box z5 = box.new(na, na, na, na, border_color=color.new(color.gray, 100))
+var box z6 = box.new(na, na, na, na, border_color=color.new(color.gray, 100))
 
+box.set_extend(z1, extV)
 box.set_top(z1, showFill ? math.max(lp0, lp236) : na)
 box.set_bottom(z1, showFill ? math.min(lp0, lp236) : na)
-box.set_left(z1, leftX)
-box.set_right(z1, bar_index)
+box.set_left(z1, lx1)
+box.set_right(z1, lx2)
 box.set_bgcolor(z1, color.new(c236, fillT))
+box.set_extend(z2, extV)
 box.set_top(z2, showFill ? math.max(lp236, lp382) : na)
 box.set_bottom(z2, showFill ? math.min(lp236, lp382) : na)
-box.set_left(z2, leftX)
-box.set_right(z2, bar_index)
+box.set_left(z2, lx1)
+box.set_right(z2, lx2)
 box.set_bgcolor(z2, color.new(c382, fillT))
+box.set_extend(z3, extV)
 box.set_top(z3, showFill ? math.max(lp382, lp5) : na)
 box.set_bottom(z3, showFill ? math.min(lp382, lp5) : na)
-box.set_left(z3, leftX)
-box.set_right(z3, bar_index)
+box.set_left(z3, lx1)
+box.set_right(z3, lx2)
 box.set_bgcolor(z3, color.new(c5, fillT))
+box.set_extend(z4, extV)
 box.set_top(z4, showFill ? math.max(lp5, lp618) : na)
 box.set_bottom(z4, showFill ? math.min(lp5, lp618) : na)
-box.set_left(z4, leftX)
-box.set_right(z4, bar_index)
+box.set_left(z4, lx1)
+box.set_right(z4, lx2)
 box.set_bgcolor(z4, color.new(c618, fillT))
+box.set_extend(z5, extV)
 box.set_top(z5, showFill ? math.max(lp618, lp786) : na)
 box.set_bottom(z5, showFill ? math.min(lp618, lp786) : na)
-box.set_left(z5, leftX)
-box.set_right(z5, bar_index)
+box.set_left(z5, lx1)
+box.set_right(z5, lx2)
 box.set_bgcolor(z5, color.new(goldCol, goldT))
+box.set_extend(z6, extV)
 box.set_top(z6, showFill ? math.max(lp786, lp1) : na)
 box.set_bottom(z6, showFill ? math.min(lp786, lp1) : na)
-box.set_left(z6, leftX)
-box.set_right(z6, bar_index)
+box.set_left(z6, lx1)
+box.set_right(z6, lx2)
 box.set_bgcolor(z6, color.new(c1, fillT))
 
-var line l0 = line.new(na, na, na, na, extend=extend.right, color=c0, width=lineW)
-var line l236 = line.new(na, na, na, na, extend=extend.right, color=c236, width=lineW)
-var line l382 = line.new(na, na, na, na, extend=extend.right, color=c382, width=lineW)
-var line l5 = line.new(na, na, na, na, extend=extend.right, color=c5, width=lineW)
-var line l618 = line.new(na, na, na, na, extend=extend.right, color=c618, width=lineW + 1)
-var line l786 = line.new(na, na, na, na, extend=extend.right, color=c786, width=lineW)
-var line l1 = line.new(na, na, na, na, extend=extend.right, color=c1, width=lineW)
-var line le1 = line.new(na, na, na, na, extend=extend.right, color=ceCol, width=lineW, style=line.style_dashed)
-var line le2 = line.new(na, na, na, na, extend=extend.right, color=ceCol, width=lineW, style=line.style_dashed)
-var line le3 = line.new(na, na, na, na, extend=extend.right, color=ceCol, width=lineW, style=line.style_dashed)
+var line l0 = line.new(na, na, na, na, color=c0, width=lineW)
+var line l236 = line.new(na, na, na, na, color=c236, width=lineW)
+var line l382 = line.new(na, na, na, na, color=c382, width=lineW)
+var line l5 = line.new(na, na, na, na, color=c5, width=lineW)
+var line l618 = line.new(na, na, na, na, color=c618, width=lineW + 1)
+var line l786 = line.new(na, na, na, na, color=c786, width=lineW)
+var line l1 = line.new(na, na, na, na, color=c1, width=lineW)
+var line le1 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line le2 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line le3 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
 
-line.set_xy1(l0, leftX, lp0)
-line.set_xy2(l0, bar_index, lp0)
-line.set_xy1(l236, leftX, lp236)
-line.set_xy2(l236, bar_index, lp236)
-line.set_xy1(l382, leftX, lp382)
-line.set_xy2(l382, bar_index, lp382)
-line.set_xy1(l5, leftX, lp5)
-line.set_xy2(l5, bar_index, lp5)
-line.set_xy1(l618, leftX, lp618)
-line.set_xy2(l618, bar_index, lp618)
-line.set_xy1(l786, leftX, lp786)
-line.set_xy2(l786, bar_index, lp786)
-line.set_xy1(l1, leftX, lp1)
-line.set_xy2(l1, bar_index, lp1)
-line.set_xy1(le1, leftX, le1272)
-line.set_xy2(le1, bar_index, le1272)
-line.set_xy1(le2, leftX, le1618)
-line.set_xy2(le2, bar_index, le1618)
-line.set_xy1(le3, leftX, le2618)
-line.set_xy2(le3, bar_index, le2618)
+line.set_extend(l0, extV)
+line.set_xy1(l0, lx1, lp0)
+line.set_xy2(l0, lx2, lp0)
+line.set_extend(l236, extV)
+line.set_xy1(l236, lx1, lp236)
+line.set_xy2(l236, lx2, lp236)
+line.set_extend(l382, extV)
+line.set_xy1(l382, lx1, lp382)
+line.set_xy2(l382, lx2, lp382)
+line.set_extend(l5, extV)
+line.set_xy1(l5, lx1, lp5)
+line.set_xy2(l5, lx2, lp5)
+line.set_extend(l618, extV)
+line.set_xy1(l618, lx1, lp618)
+line.set_xy2(l618, lx2, lp618)
+line.set_extend(l786, extV)
+line.set_xy1(l786, lx1, lp786)
+line.set_xy2(l786, lx2, lp786)
+line.set_extend(l1, extV)
+line.set_xy1(l1, lx1, lp1)
+line.set_xy2(l1, lx2, lp1)
+line.set_extend(le1, extV)
+line.set_xy1(le1, lx1, le1272)
+line.set_xy2(le1, lx2, le1272)
+line.set_extend(le2, extV)
+line.set_xy1(le2, lx1, le1618)
+line.set_xy2(le2, lx2, le1618)
+line.set_extend(le3, extV)
+line.set_xy1(le3, lx1, le2618)
+line.set_xy2(le3, lx2, le2618)
 
 var line conn = line.new(na, na, na, na, color=color.new(color.gray, 10), width=1, style=line.style_dashed)
-line.set_xy1(conn, showConn ? startBar : na, showConn ? bb : na)
-line.set_xy2(conn, showConn ? endBar : na, showConn ? aa : na)
+line.set_xy1(conn, showConnEff ? startBar : na, showConnEff ? bb : na)
+line.set_xy2(conn, showConnEff ? endBar : na, showConnEff ? aa : na)
 
 htfHi = request.security(syminfo.tickerid, mtfTf, ta.highest(high, swingLook), lookahead=barmerge.lookahead_off)
 htfLo = request.security(syminfo.tickerid, mtfTf, ta.lowest(low, swingLook), lookahead=barmerge.lookahead_off)
@@ -153,10 +180,10 @@ htf618 = showMtf and not na(htfHi) ? htfHi - (htfHi - htfLo) * 0.618 : na
 htf5 = showMtf and not na(htfHi) ? htfHi - (htfHi - htfLo) * 0.5 : na
 var line m618 = line.new(na, na, na, na, extend=extend.both, color=htfCol, width=1, style=line.style_dashed)
 var line m5 = line.new(na, na, na, na, extend=extend.both, color=htfCol, width=1, style=line.style_dotted)
-line.set_xy1(m618, bar_index - 1, htf618)
-line.set_xy2(m618, bar_index, htf618)
-line.set_xy1(m5, bar_index - 1, htf5)
-line.set_xy2(m5, bar_index, htf5)
+line.set_xy1(m618, lx1, htf618)
+line.set_xy2(m618, lx2, htf618)
+line.set_xy1(m5, lx1, htf5)
+line.set_xy2(m5, lx2, htf5)
 
 var label b0 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=c0, size=size.small)
 var label b236 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=c236, size=size.small)
@@ -192,10 +219,10 @@ label.set_text(be3, showLbl and not na(le2618) ? "2.618  " + str.tostring(le2618
 
 var label mkH = label.new(na, na, "", style=label.style_label_down, color=color.new(#f23645, 20), textcolor=color.white, size=size.small)
 var label mkL = label.new(na, na, "", style=label.style_label_up, color=color.new(#4caf50, 20), textcolor=color.white, size=size.small)
-label.set_xy(mkH, highBar, showMarkers ? hh : na)
-label.set_text(mkH, showMarkers and not na(hh) ? "H" : "")
-label.set_xy(mkL, lowBar, showMarkers ? ll : na)
-label.set_text(mkL, showMarkers and not na(ll) ? "L" : "")
+label.set_xy(mkH, highBar, showMarkEff ? hh : na)
+label.set_text(mkH, showMarkEff and not na(hh) ? "H" : "")
+label.set_xy(mkL, lowBar, showMarkEff ? ll : na)
+label.set_text(mkL, showMarkEff and not na(ll) ? "L" : "")
 
 posPct = hasData ? (close - aa) / rng * 100 : na
 zoneTxt = not hasData ? "-" : posPct < 0 ? "Above 0%" : posPct < 23.6 ? "0 - 0.236" : posPct < 38.2 ? "0.236 - 0.382" : posPct < 50 ? "0.382 - 0.5" : posPct < 61.8 ? "0.5 - 0.618" : posPct < 78.6 ? "GOLDEN ZONE" : posPct <= 100 ? "0.786 - 1.0" : "Below 100%"
