@@ -5,96 +5,86 @@
 //  golden zone, extensions, labels, dashboard, multi-timeframe & alerts.
 //  Author: berkayturhal38   |   License: MPL-2.0
 // ============================================================================
-indicator(title     = "Turhal Smart Fibonacci PRO",
-          shorttitle = "Turhal Fib PRO",
-          overlay    = true,
-          max_lines_count   = 500,
-          max_labels_count  = 500,
-          max_boxes_count   = 100)
+indicator("Turhal Smart Fibonacci PRO", "Turhal Fib PRO", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=100)
 
 // ============================================================================
 //  INPUT LAYER
 // ============================================================================
-gSwing = "🌀 Swing Detection"
-pivotLen = input.int(15, "Swing Sensitivity (Pivot Length)", minval=1, maxval=200, group=gSwing,
-     tooltip="Higher = fewer, larger swings. Lower = more reactive, smaller swings.")
-dirMode  = input.string("Auto (Swing Structure)", "Direction Mode",
-     options=["Auto (Swing Structure)", "EMA Filter", "Manual Up", "Manual Down"], group=gSwing,
-     tooltip="How the trend direction (and therefore 0%/100% anchor order) is chosen.")
-emaLen   = input.int(50, "EMA Filter Length", minval=1, group=gSwing,
-     tooltip="Used only when Direction Mode = 'EMA Filter'.")
+gSwing = "Swing Detection"
+pivotLen = input.int(15, "Swing Sensitivity (Pivot Length)", minval=1, maxval=200, group=gSwing, tooltip="Higher = fewer, larger swings. Lower = more reactive, smaller swings.")
+dirMode = input.string("Auto (Swing Structure)", "Direction Mode", options=["Auto (Swing Structure)", "EMA Filter", "Manual Up", "Manual Down"], group=gSwing, tooltip="How the trend direction (0%/100% anchor order) is chosen.")
+emaLen = input.int(50, "EMA Filter Length", minval=1, group=gSwing, tooltip="Used only when Direction Mode = 'EMA Filter'.")
 
-gRetr = "📐 Retracement Levels"
+gRetr = "Retracement Levels"
 showRetr = input.bool(true, "Show Retracements", group=gRetr)
-r0   = input.bool(true,  "0.0",   inline="r0", group=gRetr)
-c0   = input.color(#787b86, "", inline="r0", group=gRetr)
-r236 = input.bool(true,  "0.236", inline="r1", group=gRetr)
+r0 = input.bool(true, "0.0", inline="r0", group=gRetr)
+c0 = input.color(#787b86, "", inline="r0", group=gRetr)
+r236 = input.bool(true, "0.236", inline="r1", group=gRetr)
 c236 = input.color(#f23645, "", inline="r1", group=gRetr)
-r382 = input.bool(true,  "0.382", inline="r2", group=gRetr)
+r382 = input.bool(true, "0.382", inline="r2", group=gRetr)
 c382 = input.color(#ff9800, "", inline="r2", group=gRetr)
-r5   = input.bool(true,  "0.5",   inline="r3", group=gRetr)
-c5   = input.color(#4caf50, "", inline="r3", group=gRetr)
-r618 = input.bool(true,  "0.618", inline="r4", group=gRetr)
+r5 = input.bool(true, "0.5", inline="r3", group=gRetr)
+c5 = input.color(#4caf50, "", inline="r3", group=gRetr)
+r618 = input.bool(true, "0.618", inline="r4", group=gRetr)
 c618 = input.color(#00bcd4, "", inline="r4", group=gRetr)
-r786 = input.bool(true,  "0.786", inline="r5", group=gRetr)
+r786 = input.bool(true, "0.786", inline="r5", group=gRetr)
 c786 = input.color(#2962ff, "", inline="r5", group=gRetr)
-r1   = input.bool(true,  "1.0",   inline="r6", group=gRetr)
-c1   = input.color(#787b86, "", inline="r6", group=gRetr)
+r1 = input.bool(true, "1.0", inline="r6", group=gRetr)
+c1 = input.color(#787b86, "", inline="r6", group=gRetr)
 
-gExt = "🚀 Extension Levels"
+gExt = "Extension Levels"
 showExt = input.bool(true, "Show Extensions", group=gExt)
-e1272 = input.bool(true,  "1.272", inline="e0", group=gExt)
+e1272 = input.bool(true, "1.272", inline="e0", group=gExt)
 ce1272 = input.color(#9c27b0, "", inline="e0", group=gExt)
 e1414 = input.bool(false, "1.414", inline="e1", group=gExt)
 ce1414 = input.color(#9c27b0, "", inline="e1", group=gExt)
-e1618 = input.bool(true,  "1.618", inline="e2", group=gExt)
+e1618 = input.bool(true, "1.618", inline="e2", group=gExt)
 ce1618 = input.color(#e91e63, "", inline="e2", group=gExt)
-e200  = input.bool(false, "2.0",   inline="e3", group=gExt)
-ce200  = input.color(#e91e63, "", inline="e3", group=gExt)
-e2618 = input.bool(true,  "2.618", inline="e4", group=gExt)
+e200 = input.bool(false, "2.0", inline="e3", group=gExt)
+ce200 = input.color(#e91e63, "", inline="e3", group=gExt)
+e2618 = input.bool(true, "2.618", inline="e4", group=gExt)
 ce2618 = input.color(#e91e63, "", inline="e4", group=gExt)
 
-gGold = "✨ Golden Zone"
+gGold = "Golden Zone"
 showGold = input.bool(true, "Show Golden Zone", group=gGold)
 goldFrom = input.float(0.618, "From", minval=0, maxval=3, step=0.001, group=gGold, inline="g")
-goldTo   = input.float(0.786, "To",   minval=0, maxval=3, step=0.001, group=gGold, inline="g")
-goldCol  = input.color(#ffd700, "Color", group=gGold)
+goldTo = input.float(0.786, "To", minval=0, maxval=3, step=0.001, group=gGold, inline="g")
+goldCol = input.color(#ffd700, "Color", group=gGold)
 
-gVis = "🎨 Visuals"
-theme    = input.string("Dark", "Theme", options=["Dark", "Light", "Neon"], group=gVis)
-lineW    = input.int(2, "Line Width", minval=1, maxval=5, group=gVis)
-lineSty  = input.string("Solid", "Line Style", options=["Solid", "Dashed", "Dotted"], group=gVis)
-extR     = input.bool(true,  "Extend Lines Right", group=gVis)
-fillOn   = input.bool(true,  "Fill Between Retracements", group=gVis)
+gVis = "Visuals"
+theme = input.string("Dark", "Theme", options=["Dark", "Light", "Neon"], group=gVis)
+lineW = input.int(2, "Line Width", minval=1, maxval=5, group=gVis)
+lineSty = input.string("Solid", "Line Style", options=["Solid", "Dashed", "Dotted"], group=gVis)
+extR = input.bool(true, "Extend Lines Right", group=gVis)
+fillOn = input.bool(true, "Fill Between Retracements", group=gVis)
 showLabels = input.bool(true, "Show Labels", group=gVis)
 showPercent = input.bool(true, "Label: Ratio", inline="lab", group=gVis)
-showPrice   = input.bool(true, "Label: Price", inline="lab", group=gVis)
-labelSzStr  = input.string("Small", "Label Size", options=["Tiny","Small","Normal","Large"], group=gVis)
+showPrice = input.bool(true, "Label: Price", inline="lab", group=gVis)
+labelSzStr = input.string("Small", "Label Size", options=["Tiny", "Small", "Normal", "Large"], group=gVis)
 
-gDash = "📊 Dashboard"
+gDash = "Dashboard"
 showTable = input.bool(true, "Show Info Table", group=gDash)
-tblPosStr = input.string("Top Right", "Position",
-     options=["Top Right","Top Left","Bottom Right","Bottom Left"], group=gDash)
+tblPosStr = input.string("Top Right", "Position", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group=gDash)
 
-gMtf = "⏱ Multi-Timeframe Confluence"
+gMtf = "Multi-Timeframe Confluence"
 showMtf = input.bool(false, "Show HTF Fib (0.5 / 0.618)", group=gMtf)
-mtfTf   = input.timeframe("240", "Higher Timeframe", group=gMtf)
+mtfTf = input.timeframe("240", "Higher Timeframe", group=gMtf)
 
-gAlert = "🔔 Alerts"
+gAlert = "Alerts"
 alertTouch = input.bool(true, "Alert on level touch", group=gAlert)
-alertGold  = input.bool(true, "Alert on Golden Zone entry", group=gAlert)
+alertGold = input.bool(true, "Alert on Golden Zone entry", group=gAlert)
 alertBreak = input.bool(true, "Alert on 0% / 100% break", group=gAlert)
 
 // ============================================================================
 //  HELPERS (pure mappers)
 // ============================================================================
 f_lineStyle(s) => s == "Dashed" ? line.style_dashed : s == "Dotted" ? line.style_dotted : line.style_solid
-f_size(s)      => s == "Tiny" ? size.tiny : s == "Small" ? size.small : s == "Large" ? size.large : size.normal
-f_tblPos(s)    => s == "Top Left" ? position.top_left : s == "Bottom Right" ? position.bottom_right : s == "Bottom Left" ? position.bottom_left : position.top_right
+f_size(s) => s == "Tiny" ? size.tiny : s == "Small" ? size.small : s == "Large" ? size.large : size.normal
+f_tblPos(s) => s == "Top Left" ? position.top_left : s == "Bottom Right" ? position.bottom_right : s == "Bottom Left" ? position.bottom_left : position.top_right
 
 lineStyV = f_lineStyle(lineSty)
-labelSz  = f_size(labelSzStr)
-isLight  = theme == "Light"
+labelSz = f_size(labelSzStr)
+isLight = theme == "Light"
 labelTxt = isLight ? color.white : color.black
 
 // ============================================================================
@@ -103,16 +93,16 @@ labelTxt = isLight ? color.white : color.black
 ph = ta.pivothigh(pivotLen, pivotLen)
 pl = ta.pivotlow(pivotLen, pivotLen)
 
-var float lastPH  = na
-var int   lastPHb = na
-var float lastPL  = na
-var int   lastPLb = na
+var float lastPH = na
+var int lastPHb = na
+var float lastPL = na
+var int lastPLb = na
 
 if not na(ph)
-    lastPH  := ph
+    lastPH := ph
     lastPHb := bar_index - pivotLen
 if not na(pl)
-    lastPL  := pl
+    lastPL := pl
     lastPLb := bar_index - pivotLen
 
 // ============================================================================
@@ -120,9 +110,7 @@ if not na(pl)
 // ============================================================================
 emaVal = ta.ema(close, emaLen)
 autoUp = (not na(lastPHb) and not na(lastPLb)) ? (lastPHb > lastPLb) : na
-curUp  = dirMode == "Manual Up"   ? true  :
-         dirMode == "Manual Down" ? false :
-         dirMode == "EMA Filter"  ? close > emaVal : autoUp
+curUp = dirMode == "Manual Up" ? true : dirMode == "Manual Down" ? false : dirMode == "EMA Filter" ? close > emaVal : autoUp
 
 hasAnchor = not na(lastPH) and not na(lastPL) and not na(curUp)
 
@@ -134,11 +122,11 @@ anchorStartBar = na(lastPHb) or na(lastPLb) ? bar_index : math.min(lastPHb, last
 // ============================================================================
 //  RENDER LAYER  —  object pools (deleted & rebuilt on each new swing)
 // ============================================================================
-var line[]     L     = array.new<line>()
-var label[]    LB    = array.new<label>()
-var box[]      BX    = array.new<box>()
-var line[]     RLine = array.new<line>()   // retracement lines (for fills)
-var linefill[] LF    = array.new<linefill>()
+var line[] L = array.new<line>()
+var label[] LB = array.new<label>()
+var box[] BX = array.new<box>()
+var line[] RLine = array.new<line>()
+var linefill[] LF = array.new<linefill>()
 
 f_clear() =>
     for ln in L
@@ -155,13 +143,11 @@ f_clear() =>
     array.clear(LF)
     array.clear(RLine)
 
-// draw a single fib level + optional label; returns the created line
 f_level(float r, color col, bool show, bool isRetr) =>
     line ln = na
     if show and hasAnchor
-        p  = price0 + (price1 - price0) * r
-        ln := line.new(anchorStartBar, p, bar_index, p, xloc=xloc.bar_index,
-                 color=col, width=lineW, style=lineStyV, extend=extR ? extend.right : extend.none)
+        p = price0 + (price1 - price0) * r
+        ln := line.new(anchorStartBar, p, bar_index, p, xloc=xloc.bar_index, color=col, width=lineW, style=lineStyV, extend=extR ? extend.right : extend.none)
         array.push(L, ln)
         if isRetr
             array.push(RLine, ln)
@@ -171,58 +157,42 @@ f_level(float r, color col, bool show, bool isRetr) =>
                 txt := str.tostring(r, "0.###")
             if showPrice
                 txt := txt + (showPercent ? "  " : "") + str.tostring(p, format.mintick)
-            lb = label.new(bar_index + 3, p, txt, xloc=xloc.bar_index,
-                     style=label.style_label_left, color=col,
-                     textcolor=theme == "Neon" ? color.white : labelTxt, size=labelSz)
+            lb = label.new(bar_index + 3, p, txt, xloc=xloc.bar_index, style=label.style_label_left, color=col, textcolor=theme == "Neon" ? color.white : labelTxt, size=labelSz)
             array.push(LB, lb)
     ln
 
-// redraw only when the swing anchor or direction actually changes
-var int lastDrawPH  = na
-var int lastDrawPL  = na
+var int lastDrawPH = na
+var int lastDrawPL = na
 var int lastDrawDir = na
 curDirInt = na(curUp) ? na : (curUp ? 1 : 0)
 needRedraw = hasAnchor and (lastPHb != lastDrawPH or lastPLb != lastDrawPL or curDirInt != lastDrawDir)
 
 if needRedraw
     f_clear()
-
-    // Retracements
-    f_level(0.0,   c0,   showRetr and r0,   true)
+    f_level(0.0, c0, showRetr and r0, true)
     f_level(0.236, c236, showRetr and r236, true)
     f_level(0.382, c382, showRetr and r382, true)
-    f_level(0.5,   c5,   showRetr and r5,   true)
+    f_level(0.5, c5, showRetr and r5, true)
     f_level(0.618, c618, showRetr and r618, true)
     f_level(0.786, c786, showRetr and r786, true)
-    f_level(1.0,   c1,   showRetr and r1,   true)
-
-    // Extensions
+    f_level(1.0, c1, showRetr and r1, true)
     f_level(1.272, ce1272, showExt and e1272, false)
     f_level(1.414, ce1414, showExt and e1414, false)
     f_level(1.618, ce1618, showExt and e1618, false)
-    f_level(2.0,   ce200,  showExt and e200,  false)
+    f_level(2.0, ce200, showExt and e200, false)
     f_level(2.618, ce2618, showExt and e2618, false)
-
-    // Golden zone box
     if showGold
         gA = price0 + (price1 - price0) * goldFrom
         gB = price0 + (price1 - price0) * goldTo
-        bx = box.new(anchorStartBar, math.max(gA, gB), bar_index, math.min(gA, gB),
-                 xloc=xloc.bar_index, bgcolor=color.new(goldCol, 85),
-                 border_color=color.new(goldCol, 40), border_width=1,
-                 extend=extR ? extend.right : extend.none)
+        bx = box.new(anchorStartBar, math.max(gA, gB), bar_index, math.min(gA, gB), xloc=xloc.bar_index, bgcolor=color.new(goldCol, 85), border_color=color.new(goldCol, 40), border_width=1, extend=extR ? extend.right : extend.none)
         array.push(BX, bx)
-
-    // Fills between consecutive retracement lines
     if fillOn and array.size(RLine) >= 2
         for i = 0 to array.size(RLine) - 2
             tint = i % 2 == 0 ? 92 : 96
-            lf = linefill.new(array.get(RLine, i), array.get(RLine, i + 1),
-                     color=color.new(isLight ? color.gray : color.blue, tint))
+            lf = linefill.new(array.get(RLine, i), array.get(RLine, i + 1), color.new(isLight ? color.gray : color.blue, tint))
             array.push(LF, lf)
-
-    lastDrawPH  := lastPHb
-    lastDrawPL  := lastPLb
+    lastDrawPH := lastPHb
+    lastDrawPL := lastPLb
     lastDrawDir := curDirInt
 
 // ============================================================================
@@ -233,13 +203,13 @@ f_swing() =>
     l = ta.pivotlow(pivotLen, pivotLen)
     var float sPH = na
     var float sPL = na
-    var int   sPHb = na
-    var int   sPLb = na
+    var int sPHb = na
+    var int sPLb = na
     if not na(h)
-        sPH  := h
+        sPH := h
         sPHb := bar_index - pivotLen
     if not na(l)
-        sPL  := l
+        sPL := l
         sPLb := bar_index - pivotLen
     up = (not na(sPHb) and not na(sPLb)) ? sPHb > sPLb : na
     p0 = up ? sPH : sPL
@@ -249,32 +219,28 @@ f_swing() =>
 [mp0, mp1] = request.security(syminfo.tickerid, mtfTf, f_swing(), lookahead=barmerge.lookahead_off)
 
 var line mLine618 = na
-var line mLine5   = na
+var line mLine5 = na
 if barstate.islast
     line.delete(mLine618)
     line.delete(mLine5)
     if showMtf and not na(mp0) and not na(mp1)
         lvl618 = mp0 + (mp1 - mp0) * 0.618
-        lvl5   = mp0 + (mp1 - mp0) * 0.5
+        lvl5 = mp0 + (mp1 - mp0) * 0.5
         xL = bar_index - 120
-        mLine618 := line.new(xL, lvl618, bar_index, lvl618, xloc=xloc.bar_index,
-                     color=color.new(color.orange, 0), style=line.style_dashed, width=2, extend=extend.right)
-        mLine5   := line.new(xL, lvl5, bar_index, lvl5, xloc=xloc.bar_index,
-                     color=color.new(color.gray, 0), style=line.style_dotted, width=1, extend=extend.right)
+        mLine618 := line.new(xL, lvl618, bar_index, lvl618, xloc=xloc.bar_index, color=color.new(color.orange, 0), style=line.style_dashed, width=2, extend=extend.right)
+        mLine5 := line.new(xL, lvl5, bar_index, lvl5, xloc=xloc.bar_index, color=color.new(color.gray, 0), style=line.style_dotted, width=1, extend=extend.right)
 
 // ============================================================================
 //  UI LAYER  —  info dashboard
 // ============================================================================
-var table dash = table.new(f_tblPos(tblPosStr), 2, 6, border_width=1,
-     frame_color=color.new(color.gray, 40), frame_width=1)
+var table dash = table.new(f_tblPos(tblPosStr), 2, 6, border_width=1, frame_color=color.new(color.gray, 40), frame_width=1)
 if showTable and barstate.islast
-    rng    = price0 - price1
+    rng = price0 - price1
     posPct = hasAnchor and rng != 0 ? (price0 - close) / rng * 100 : na
-    dirTxt = na(curUp) ? "—" : (curUp ? "▲ UP" : "▼ DOWN")
-    dirBg  = na(curUp) ? color.gray : (curUp ? color.new(color.green, 70) : color.new(color.red, 70))
+    dirTxt = na(curUp) ? "-" : (curUp ? "UP" : "DOWN")
+    dirBg = na(curUp) ? color.gray : (curUp ? color.new(color.green, 70) : color.new(color.red, 70))
     headBg = isLight ? color.new(color.gray, 80) : color.new(color.black, 20)
     txtCol = isLight ? color.black : color.white
-
     table.cell(dash, 0, 0, "Turhal Fib PRO", text_color=txtCol, bgcolor=headBg, text_size=size.small)
     table.cell(dash, 1, 0, dirTxt, text_color=txtCol, bgcolor=dirBg, text_size=size.small)
     table.cell(dash, 0, 1, "0% / High", text_color=txtCol, bgcolor=headBg, text_size=size.tiny)
@@ -286,36 +252,34 @@ if showTable and barstate.islast
     table.cell(dash, 0, 4, "Golden Zone", text_color=txtCol, bgcolor=headBg, text_size=size.tiny)
     table.cell(dash, 1, 4, str.tostring(goldFrom, "0.###") + " - " + str.tostring(goldTo, "0.###"), text_color=txtCol, bgcolor=color.new(goldCol, 60), text_size=size.tiny)
     table.cell(dash, 0, 5, "Price @ Retr", text_color=txtCol, bgcolor=headBg, text_size=size.tiny)
-    table.cell(dash, 1, 5, na(posPct) ? "—" : str.tostring(posPct, "0.0") + " %", text_color=txtCol, bgcolor=headBg, text_size=size.tiny)
+    table.cell(dash, 1, 5, na(posPct) ? "-" : str.tostring(posPct, "0.0") + " %", text_color=txtCol, bgcolor=headBg, text_size=size.tiny)
 
 // ============================================================================
 //  ALERT LAYER
 // ============================================================================
 gLo = price0 + (price1 - price0) * math.min(goldFrom, goldTo)
 gHi = price0 + (price1 - price0) * math.max(goldFrom, goldTo)
-goldLow  = math.min(gLo, gHi)
+goldLow = math.min(gLo, gHi)
 goldHigh = math.max(gLo, gHi)
 
-inGold    = hasAnchor and close <= goldHigh and close >= goldLow
+inGold = hasAnchor and close <= goldHigh and close >= goldLow
 goldEntry = inGold and not inGold[1]
-brokeHi   = hasAnchor and ta.crossover(close, price0)
-brokeLo   = hasAnchor and ta.crossunder(close, price1)
+brokeHi = hasAnchor and ta.crossover(close, price0)
+brokeLo = hasAnchor and ta.crossunder(close, price1)
 
-// nearest active retracement touch (wick-based)
 touch618 = hasAnchor and r618 and showRetr and low <= (price0 + (price1 - price0) * 0.618) and high >= (price0 + (price1 - price0) * 0.618)
-touch5   = hasAnchor and r5   and showRetr and low <= (price0 + (price1 - price0) * 0.5)   and high >= (price0 + (price1 - price0) * 0.5)
+touch5 = hasAnchor and r5 and showRetr and low <= (price0 + (price1 - price0) * 0.5) and high >= (price0 + (price1 - price0) * 0.5)
 anyTouch = touch618 or touch5
 
 if alertGold and goldEntry
-    alert("✨ Price entered the Golden Zone (" + str.tostring(goldFrom, "0.###") + "–" + str.tostring(goldTo, "0.###") + ")", alert.freq_once_per_bar)
+    alert("Price entered the Golden Zone (" + str.tostring(goldFrom, "0.###") + "-" + str.tostring(goldTo, "0.###") + ")", alert.freq_once_per_bar)
 if alertBreak and brokeHi
-    alert("🚀 Price broke the 0% Fib level", alert.freq_once_per_bar)
+    alert("Price broke the 0% Fib level", alert.freq_once_per_bar)
 if alertBreak and brokeLo
-    alert("🔻 Price broke the 100% Fib level", alert.freq_once_per_bar)
+    alert("Price broke the 100% Fib level", alert.freq_once_per_bar)
 if alertTouch and anyTouch
-    alert("🎯 Price touched a key Fibonacci level", alert.freq_once_per_bar)
+    alert("Price touched a key Fibonacci level", alert.freq_once_per_bar)
 
-// Compile-time alerts (selectable from the TradingView alert dialog)
-alertcondition(goldEntry, "Golden Zone Entry", "Turhal Fib PRO: price entered the Golden Zone ✨")
-alertcondition(brokeHi,   "Broke 0% Level",    "Turhal Fib PRO: price broke the 0% level 🚀")
-alertcondition(brokeLo,   "Broke 100% Level",  "Turhal Fib PRO: price broke the 100% level 🔻")
+alertcondition(goldEntry, "Golden Zone Entry", "Turhal Fib PRO: price entered the Golden Zone")
+alertcondition(brokeHi, "Broke 0% Level", "Turhal Fib PRO: price broke the 0% level")
+alertcondition(brokeLo, "Broke 100% Level", "Turhal Fib PRO: price broke the 100% level")
