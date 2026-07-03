@@ -68,7 +68,7 @@ lastPLb := na(pl) ? lastPLb : bar_index - pivotLen
 emaVal = ta.ema(close, emaLen)
 autoUp = lastPHb > lastPLb
 curUp = dirMode == "Manual Up" ? true : dirMode == "Manual Down" ? false : dirMode == "EMA Filter" ? close > emaVal : autoUp
-hasAnchor = not na(lastPH) and not na(lastPL) and not na(curUp)
+hasAnchor = not na(lastPH) and not na(lastPL)
 price0 = curUp ? lastPH : lastPL
 price1 = curUp ? lastPL : lastPH
 rng = price0 - price1
@@ -100,8 +100,8 @@ isLight = theme == "Light"
 txtCol = isLight ? color.black : color.white
 headBg = isLight ? color.new(color.gray, 80) : color.new(color.black, 20)
 posPct = hasAnchor and rng != 0 ? (price0 - close) / rng * 100 : na
-dirTxt = na(curUp) ? "-" : curUp ? "UP" : "DOWN"
-dirBg = na(curUp) ? color.gray : curUp ? color.new(color.green, 55) : color.new(color.red, 55)
+dirTxt = not hasAnchor ? "-" : curUp ? "UP" : "DOWN"
+dirBg = not hasAnchor ? color.gray : curUp ? color.new(color.green, 55) : color.new(color.red, 55)
 tblP = tblPos == "Top Left" ? position.top_left : tblPos == "Bottom Right" ? position.bottom_right : tblPos == "Bottom Left" ? position.bottom_left : position.top_right
 var table dash = table.new(tblP, 2, 5, border_width=1, frame_color=color.new(color.gray, 40), frame_width=1)
 table.cell(dash, 0, 0, "Turhal Fib PRO", text_color=txtCol, bgcolor=headBg, text_size=size.small)
