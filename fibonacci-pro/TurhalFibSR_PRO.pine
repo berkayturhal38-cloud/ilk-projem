@@ -40,7 +40,7 @@ aa = up ? hh : ll
 bb = up ? ll : hh
 rng = bb - aa
 hasData = not na(aa) and not na(bb) and rng != 0
-leftX = bar_index + math.min(hhBar, llBar)
+leftX = hhBar < llBar ? bar_index + hhBar : bar_index + llBar
 startBar = up ? bar_index + llBar : bar_index + hhBar
 endBar = up ? bar_index + hhBar : bar_index + llBar
 
