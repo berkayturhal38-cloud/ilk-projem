@@ -17,7 +17,8 @@ showFill = input.bool(true, "Fill Zones", group=gs)
 fillT = input.int(85, "Zone Transparency", minval=50, maxval=98, group=gs)
 showConn = input.bool(true, "Trend Line", group=gs)
 showLbl = input.bool(true, "Show Labels", group=gs)
-showExt = input.bool(true, "Show Extensions (1.272 ... 4.764)", group=gs)
+showExt = input.bool(true, "Show Extensions (1.272 ... 2.618)", group=gs)
+showExtDeep = input.bool(false, "Show Deep Extensions (3.0 ... 4.764)", group=gs)
 
 gc = "Colors"
 c0 = input.color(#787b86, "0.0", group=gc)
@@ -52,16 +53,16 @@ e200 = showExt ? aa + rng * 2.0 : na
 e2272 = showExt ? aa + rng * 2.272 : na
 e2414 = showExt ? aa + rng * 2.414 : na
 e2618 = showExt ? aa + rng * 2.618 : na
-e300 = showExt ? aa + rng * 3.0 : na
-e3272 = showExt ? aa + rng * 3.272 : na
-e3414 = showExt ? aa + rng * 3.414 : na
-e3618 = showExt ? aa + rng * 3.618 : na
-e400 = showExt ? aa + rng * 4.0 : na
-e4236 = showExt ? aa + rng * 4.236 : na
-e4272 = showExt ? aa + rng * 4.272 : na
-e4414 = showExt ? aa + rng * 4.414 : na
-e4618 = showExt ? aa + rng * 4.618 : na
-e4764 = showExt ? aa + rng * 4.764 : na
+e300 = showExt and showExtDeep ? aa + rng * 3.0 : na
+e3272 = showExt and showExtDeep ? aa + rng * 3.272 : na
+e3414 = showExt and showExtDeep ? aa + rng * 3.414 : na
+e3618 = showExt and showExtDeep ? aa + rng * 3.618 : na
+e400 = showExt and showExtDeep ? aa + rng * 4.0 : na
+e4236 = showExt and showExtDeep ? aa + rng * 4.236 : na
+e4272 = showExt and showExtDeep ? aa + rng * 4.272 : na
+e4414 = showExt and showExtDeep ? aa + rng * 4.414 : na
+e4618 = showExt and showExtDeep ? aa + rng * 4.618 : na
+e4764 = showExt and showExtDeep ? aa + rng * 4.764 : na
 
 var box z1 = box.new(na, na, na, na, xloc=xloc.bar_time, border_color=color.new(color.gray, 100))
 var box z2 = box.new(na, na, na, na, xloc=xloc.bar_time, border_color=color.new(color.gray, 100))
