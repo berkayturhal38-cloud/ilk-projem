@@ -1,52 +1,73 @@
 //@version=6
 // ============================================================================
-//  Turhal AI PRO  —  Smart Money Concepts (SMC) System
-//  V1 (PRO): Swing High/Low · Market Structure (HH/LH/HL/LL) · BOS · CHoCH ·
-//            Trend · Multi-Timeframe (1H/4H) · ATR + Volume strength filter
+//  Turhal AI PRO  —  Smart Money Concepts (SMC) System   ·   V1 FINAL
+//  Swing/Structure · BOS · CHoCH · Trend · MTF(1H/4H) · ATR+Volume filter ·
+//  Liquidity (EQH/EQL) · Liquidity-Sweep confidence · Adaptive Swing Length ·
+//  Signal Strength (0-100) · Auto object cleanup.
 //  Author: berkayturhal38 | License: MPL-2.0
-//  Non-repaint: pivots are confirmed (lag = swingLen bars); structure breaks
-//  commit only on bar close (barstate.isconfirmed); MTF via lookahead_off.
+//  Non-repaint: confirmed pivots; breaks commit on bar close; MTF lookahead_off.
 // ============================================================================
-indicator("Turhal AI PRO — V1", "Turhal AI PRO", overlay = true, max_lines_count = 500, max_labels_count = 500)
+indicator("Turhal AI PRO — V1 FINAL", "Turhal AI PRO", overlay = true, max_lines_count = 500, max_labels_count = 500)
 
 // ============================================================================
 //  INPUTS
 // ============================================================================
-grpS = "Structure"
-swingLen   = input.int(10, "Swing Length", minval = 2, maxval = 100, group = grpS, tooltip = "Higher = major structure, lower = minor structure.")
-showSwings = input.bool(true, "Show Swing Points (HH/LH/HL/LL)", group = grpS)
-showBOS    = input.bool(true, "Show BOS",   group = grpS)
-showCHOCH  = input.bool(true, "Show CHoCH", group = grpS)
+gS = "Structure"
+swingLen   = input.int(10, "Base Swing Length", minval = 2, maxval = 100, group = gS)
+adaptive   = input.bool(true, "Adaptive Swing Length (volatility based)", group = gS)
+showSwings = input.bool(true, "Show Swing Points (HH/LH/HL/LL)", group = gS)
+showBOS    = input.bool(true, "Show BOS",   group = gS)
+showCHOCH  = input.bool(true, "Show CHoCH", group = gS)
 
-grpF = "Strength Filters (strong breaks only)"
-useATR   = input.bool(true, "ATR Displacement Filter", group = grpF, tooltip = "Break candle body must be a strong momentum candle relative to ATR.")
-atrLen   = input.int(14, "ATR Length", minval = 1, group = grpF)
-atrMult  = input.float(0.7, "Min Body / ATR", minval = 0.0, step = 0.1, group = grpF)
-useVol   = input.bool(true, "Volume Filter", group = grpF, tooltip = "Break candle volume must exceed its moving average (auto-skipped if the symbol has no volume).")
-volLen   = input.int(20, "Volume MA Length", minval = 1, group = grpF)
-volMult  = input.float(1.2, "Min Volume / MA", minval = 0.0, step = 0.1, group = grpF)
+gF = "Filters"
+useATR  = input.bool(true, "ATR Displacement Filter", group = gF)
+atrLen  = input.int(14, "ATR Length", minval = 1, group = gF)
+atrMult = input.float(0.7, "Min Body / ATR", minval = 0.0, step = 0.1, group = gF)
+useVol  = input.bool(true, "Volume Filter", group = gF)
+volLen  = input.int(20, "Volume MA Length", minval = 1, group = gF)
+volMult = input.float(1.2, "Min Volume / MA", minval = 0.0, step = 0.1, group = gF)
 
-grpM = "Multi-Timeframe"
-mtfFilter = input.bool(true, "Require MTF Alignment", group = grpM, tooltip = "Only allow structure breaks that do not oppose the 1H and 4H trend.")
-htfTf1    = input.timeframe("60",  "Higher Timeframe 1", group = grpM)
-htfTf2    = input.timeframe("240", "Higher Timeframe 2", group = grpM)
+gSw = "Liquidity Sweep"
+useSweep     = input.bool(true, "Grade BOS by Liquidity Sweep", group = gSw, tooltip = "A BOS that is NOT preceded by a liquidity sweep is graded LOW confidence.")
+sweepLookback = input.int(15, "Sweep Lookback (bars)", minval = 1, group = gSw)
 
-grpL = "Liquidity (Equal Highs / Lows)"
-showEQ    = input.bool(true, "Show Equal Highs/Lows", group = grpL, tooltip = "Marks resting liquidity: two swing highs (or lows) at ~the same price.")
-eqAtrMult = input.float(0.1, "Equal Tolerance / ATR", minval = 0.01, step = 0.05, group = grpL)
+gM = "Multi-Timeframe"
+mtfFilter = input.bool(true, "Require MTF Alignment", group = gM)
+htfTf1    = input.timeframe("60",  "Higher Timeframe 1", group = gM)
+htfTf2    = input.timeframe("240", "Higher Timeframe 2", group = gM)
 
-grpC = "Colors"
-bullCol  = input.color(#26a69a, "Bullish", group = grpC)
-bearCol  = input.color(#ef5350, "Bearish", group = grpC)
-swingCol = input.color(#787b86, "Swing Points", group = grpC)
-eqCol    = input.color(#ffb300, "Liquidity (EQH/EQL)", group = grpC)
+gL = "Liquidity (Equal Highs / Lows)"
+showEQ    = input.bool(true, "Show Equal Highs/Lows", group = gL)
+eqAtrMult = input.float(0.1, "Equal Tolerance / ATR", minval = 0.01, step = 0.05, group = gL)
 
-grpD = "Dashboard"
-showDash = input.bool(true, "Show Dashboard", group = grpD)
+gO = "Performance"
+maxObj = input.int(80, "Max Drawn Objects (auto-clean)", minval = 10, maxval = 500, group = gO, tooltip = "Oldest lines/labels are auto-deleted beyond this count.")
+
+gC = "Colors"
+bullCol  = input.color(#26a69a, "Bullish", group = gC)
+bearCol  = input.color(#ef5350, "Bearish", group = gC)
+swingCol = input.color(#787b86, "Swing Points", group = gC)
+eqCol    = input.color(#ffb300, "Liquidity (EQH/EQL)", group = gC)
+
+gD = "Dashboard"
+showDash = input.bool(true, "Show Dashboard", group = gD)
 
 // ============================================================================
-//  REUSABLE TREND ENGINE  (used for the higher timeframes via request.security)
-//  Returns:  1 = bullish, -1 = bearish, 0 = neutral. Pivots keep it non-repaint.
+//  OBJECT POOLS  (auto cleanup — keeps well under TradingView limits)
+// ============================================================================
+var line[]  poolL = array.new<line>()
+var label[] poolB = array.new<label>()
+regL(line ln) =>
+    array.push(poolL, ln)
+    if array.size(poolL) > maxObj
+        line.delete(array.shift(poolL))
+regB(label lb) =>
+    array.push(poolB, lb)
+    if array.size(poolB) > maxObj
+        label.delete(array.shift(poolB))
+
+// ============================================================================
+//  REUSABLE TREND ENGINE  (higher timeframes via request.security)
 // ============================================================================
 f_trend() =>
     h = ta.pivothigh(swingLen, swingLen)
@@ -70,12 +91,11 @@ f_trend() =>
         t  := -1
     t
 
-// Non-repaint HTF trends (values settle at each higher-timeframe close)
 htf1 = request.security(syminfo.tickerid, htfTf1, f_trend(), lookahead = barmerge.lookahead_off)
 htf2 = request.security(syminfo.tickerid, htfTf2, f_trend(), lookahead = barmerge.lookahead_off)
 
 // ============================================================================
-//  STRENGTH FILTERS  (ATR displacement + volume)
+//  VOLATILITY, FILTERS
 // ============================================================================
 atrVal   = ta.atr(atrLen)
 bodySize = math.abs(close - open)
@@ -83,10 +103,32 @@ volMA    = ta.sma(volume, volLen)
 atrOK    = not useATR or (not na(atrVal) and bodySize >= atrVal * atrMult)
 volOK    = not useVol or na(volume) or (not na(volMA) and volume >= volMA * volMult)
 strong   = atrOK and volOK
-
-// MTF alignment gates (a bull break must not fight HTF downtrend, and vice-versa)
 bullMTFok = not mtfFilter or (htf1 >= 0 and htf2 >= 0)
 bearMTFok = not mtfFilter or (htf1 <= 0 and htf2 <= 0)
+
+// ============================================================================
+//  ADAPTIVE SWING LENGTH  (3 fixed lengths selected by volatility regime)
+//  ta.pivot* needs a simple length, so lengths are input-derived (simple);
+//  only the SELECTION between them is volatility-driven (series).
+// ============================================================================
+shortLen = math.max(2, int(swingLen * 0.5))
+midLen   = swingLen
+longLen  = math.min(200, swingLen * 2)
+
+atrSlow  = ta.sma(atrVal, 100)
+volRatio = (not na(atrSlow) and atrSlow > 0) ? atrVal / atrSlow : 1.0
+useShort = adaptive and volRatio < 0.85
+useLong  = adaptive and volRatio > 1.20
+effLen   = useLong ? longLen : useShort ? shortLen : midLen
+
+phS = ta.pivothigh(shortLen, shortLen)
+phM = ta.pivothigh(midLen,   midLen)
+phL = ta.pivothigh(longLen,  longLen)
+plS = ta.pivotlow(shortLen, shortLen)
+plM = ta.pivotlow(midLen,   midLen)
+plL = ta.pivotlow(longLen,  longLen)
+ph  = useLong ? phL : useShort ? phS : phM
+pl  = useLong ? plL : useShort ? plS : plM
 
 // ============================================================================
 //  STATE
@@ -102,22 +144,20 @@ var float dnLevel  = na
 var int   dnX      = na
 var bool  dnBroken = false
 var int   trend    = 0
+var int   sweepBullBar = na    // last sell-side sweep (supports bullish break)
+var int   sweepBearBar = na    // last buy-side sweep (supports bearish break)
 
 // ============================================================================
-//  MODULE 1 — SWING DETECTION  (confirmed pivots → market-structure labels)
+//  MODULE 1 — SWING DETECTION + EQUAL HIGH/LOW LIQUIDITY
 // ============================================================================
-ph = ta.pivothigh(swingLen, swingLen)
-pl = ta.pivotlow(swingLen, swingLen)
-
 if not na(ph)
-    phx   = bar_index - swingLen
+    phx   = bar_index - effLen
     phLbl = na(lastPH) ? "HH" : (ph > lastPH ? "HH" : "LH")
     if showSwings
-        label.new(phx, ph, phLbl, xloc = xloc.bar_index, style = label.style_label_down, color = color.new(swingCol, 20), textcolor = color.white, size = size.tiny)
-    // Equal High = liquidity pool (resting stops above)
+        regB(label.new(phx, ph, phLbl, xloc = xloc.bar_index, style = label.style_label_down, color = color.new(swingCol, 20), textcolor = color.white, size = size.tiny))
     if showEQ and not na(lastPH) and not na(atrVal) and math.abs(ph - lastPH) <= atrVal * eqAtrMult
-        line.new(lastPHx, lastPH, phx, ph, xloc = xloc.bar_index, color = eqCol, width = 1, style = line.style_dotted)
-        label.new(phx, math.max(ph, lastPH), "EQH", xloc = xloc.bar_index, style = label.style_label_down, color = color.new(eqCol, 20), textcolor = color.white, size = size.tiny)
+        regL(line.new(lastPHx, lastPH, phx, ph, xloc = xloc.bar_index, color = eqCol, width = 1, style = line.style_dotted))
+        regB(label.new(phx, math.max(ph, lastPH), "EQH", xloc = xloc.bar_index, style = label.style_label_down, color = color.new(eqCol, 20), textcolor = color.white, size = size.tiny))
     lastPH   := ph
     lastPHx  := phx
     upLevel  := ph
@@ -125,14 +165,13 @@ if not na(ph)
     upBroken := false
 
 if not na(pl)
-    plx   = bar_index - swingLen
+    plx   = bar_index - effLen
     plLbl = na(lastPL) ? "LL" : (pl < lastPL ? "LL" : "HL")
     if showSwings
-        label.new(plx, pl, plLbl, xloc = xloc.bar_index, style = label.style_label_up, color = color.new(swingCol, 20), textcolor = color.white, size = size.tiny)
-    // Equal Low = liquidity pool (resting stops below)
+        regB(label.new(plx, pl, plLbl, xloc = xloc.bar_index, style = label.style_label_up, color = color.new(swingCol, 20), textcolor = color.white, size = size.tiny))
     if showEQ and not na(lastPL) and not na(atrVal) and math.abs(pl - lastPL) <= atrVal * eqAtrMult
-        line.new(lastPLx, lastPL, plx, pl, xloc = xloc.bar_index, color = eqCol, width = 1, style = line.style_dotted)
-        label.new(plx, math.min(pl, lastPL), "EQL", xloc = xloc.bar_index, style = label.style_label_up, color = color.new(eqCol, 20), textcolor = color.white, size = size.tiny)
+        regL(line.new(lastPLx, lastPL, plx, pl, xloc = xloc.bar_index, color = eqCol, width = 1, style = line.style_dotted))
+        regB(label.new(plx, math.min(pl, lastPL), "EQL", xloc = xloc.bar_index, style = label.style_label_up, color = color.new(eqCol, 20), textcolor = color.white, size = size.tiny))
     lastPL   := pl
     lastPLx  := plx
     dnLevel  := pl
@@ -140,41 +179,65 @@ if not na(pl)
     dnBroken := false
 
 // ============================================================================
-//  MODULE 2 — MARKET STRUCTURE  (strong, MTF-aligned BOS / CHoCH)
+//  LIQUIDITY SWEEP DETECTION  (wick beyond structure, close back inside)
 // ============================================================================
-// Bullish break
+if not na(dnLevel) and low < dnLevel and close > dnLevel
+    sweepBullBar := bar_index
+if not na(upLevel) and high > upLevel and close < upLevel
+    sweepBearBar := bar_index
+
+sweptBull = not na(sweepBullBar) and (bar_index - sweepBullBar) <= sweepLookback
+sweptBear = not na(sweepBearBar) and (bar_index - sweepBearBar) <= sweepLookback
+
+// ============================================================================
+//  MODULE 2 — MARKET STRUCTURE  (strong, MTF-aligned, sweep-graded BOS/CHoCH)
+// ============================================================================
 if not na(upLevel) and not upBroken and barstate.isconfirmed and close > upLevel and strong and bullMTFok
     upBroken := true
     isChoch  = trend == -1
     trend    := 1
+    lowConf  = useSweep and not sweptBull
     if isChoch ? showCHOCH : showBOS
-        line.new(upX, upLevel, bar_index, upLevel, xloc = xloc.bar_index, color = bullCol, width = 2, style = isChoch ? line.style_dashed : line.style_solid)
-        label.new(bar_index, upLevel, isChoch ? "CHoCH" : "BOS", xloc = xloc.bar_index, style = label.style_label_down, color = color.new(bullCol, 15), textcolor = color.white, size = size.small)
+        regL(line.new(upX, upLevel, bar_index, upLevel, xloc = xloc.bar_index, color = bullCol, width = 2, style = isChoch ? line.style_dashed : line.style_solid))
+        regB(label.new(bar_index, upLevel, (isChoch ? "CHoCH" : "BOS") + (lowConf ? " ?" : ""), xloc = xloc.bar_index, style = label.style_label_down, color = color.new(bullCol, lowConf ? 55 : 15), textcolor = color.white, size = size.small))
 
-// Bearish break
 if not na(dnLevel) and not dnBroken and barstate.isconfirmed and close < dnLevel and strong and bearMTFok
     dnBroken := true
     isChoch  = trend == 1
     trend    := -1
+    lowConf  = useSweep and not sweptBear
     if isChoch ? showCHOCH : showBOS
-        line.new(dnX, dnLevel, bar_index, dnLevel, xloc = xloc.bar_index, color = bearCol, width = 2, style = isChoch ? line.style_dashed : line.style_solid)
-        label.new(bar_index, dnLevel, isChoch ? "CHoCH" : "BOS", xloc = xloc.bar_index, style = label.style_label_up, color = color.new(bearCol, 15), textcolor = color.white, size = size.small)
+        regL(line.new(dnX, dnLevel, bar_index, dnLevel, xloc = xloc.bar_index, color = bearCol, width = 2, style = isChoch ? line.style_dashed : line.style_solid))
+        regB(label.new(bar_index, dnLevel, (isChoch ? "CHoCH" : "BOS") + (lowConf ? " ?" : ""), xloc = xloc.bar_index, style = label.style_label_up, color = color.new(bearCol, lowConf ? 55 : 15), textcolor = color.white, size = size.small))
 
 // ============================================================================
-//  MODULE 3 — DASHBOARD  (local + MTF trend)
+//  SIGNAL STRENGTH  (0-100 from Trend/MTF + ATR + Volume + Sweep)
+// ============================================================================
+supSweep = trend == 1 ? sweptBull : trend == -1 ? sweptBear : false
+sMTF = trend == 0 ? 0.0 : ((not na(htf1) and htf1 == trend) ? 20.0 : 0.0) + ((not na(htf2) and htf2 == trend) ? 30.0 : 0.0)
+sATR = (not na(atrVal) and atrVal > 0) ? math.min(20.0, bodySize / atrVal * 13.0) : 0.0
+sVOL = (not na(volume) and not na(volMA) and volMA > 0) ? math.min(20.0, volume / volMA * 10.0) : 0.0
+sSWP = supSweep ? 10.0 : 0.0
+score = int(math.round(math.min(100.0, sMTF + sATR + sVOL + sSWP)))
+
+// ============================================================================
+//  MODULE 3 — DASHBOARD
 // ============================================================================
 f_trTxt(t) => t == 1 ? "BULLISH" : t == -1 ? "BEARISH" : "NEUTRAL"
 f_trCol(t) => t == 1 ? bullCol : t == -1 ? bearCol : color.gray
 
-var table dash = table.new(position.top_right, 2, 4, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+var table dash = table.new(position.top_right, 2, 5, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
 if showDash and barstate.islast
-    hdBg = color.new(color.black, 10)
-    kBg  = color.new(color.black, 25)
-    table.cell(dash, 0, 0, "Turhal AI PRO", text_color = color.white, bgcolor = hdBg, text_size = size.small)
-    table.cell(dash, 1, 0, "V1", text_color = color.white, bgcolor = hdBg, text_size = size.small)
-    table.cell(dash, 0, 1, "Trend", text_color = color.white, bgcolor = kBg, text_size = size.small)
+    hd = color.new(color.black, 10)
+    kb = color.new(color.black, 25)
+    scCol = score >= 70 ? bullCol : score >= 40 ? #ffb300 : color.gray
+    table.cell(dash, 0, 0, "Turhal AI PRO", text_color = color.white, bgcolor = hd, text_size = size.small)
+    table.cell(dash, 1, 0, "V1 FINAL", text_color = color.white, bgcolor = hd, text_size = size.small)
+    table.cell(dash, 0, 1, "Trend", text_color = color.white, bgcolor = kb, text_size = size.small)
     table.cell(dash, 1, 1, f_trTxt(trend), text_color = color.white, bgcolor = color.new(f_trCol(trend), 25), text_size = size.small)
-    table.cell(dash, 0, 2, "1H", text_color = color.white, bgcolor = kBg, text_size = size.small)
+    table.cell(dash, 0, 2, "1H", text_color = color.white, bgcolor = kb, text_size = size.small)
     table.cell(dash, 1, 2, f_trTxt(htf1), text_color = color.white, bgcolor = color.new(f_trCol(htf1), 25), text_size = size.small)
-    table.cell(dash, 0, 3, "4H", text_color = color.white, bgcolor = kBg, text_size = size.small)
+    table.cell(dash, 0, 3, "4H", text_color = color.white, bgcolor = kb, text_size = size.small)
     table.cell(dash, 1, 3, f_trTxt(htf2), text_color = color.white, bgcolor = color.new(f_trCol(htf2), 25), text_size = size.small)
+    table.cell(dash, 0, 4, "Signal", text_color = color.white, bgcolor = kb, text_size = size.small)
+    table.cell(dash, 1, 4, str.tostring(score) + " %", text_color = color.white, bgcolor = color.new(scCol, 20), text_size = size.small)
