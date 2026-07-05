@@ -1,13 +1,14 @@
 //@version=6
 // ============================================================================
-//  Turhal AI PRO  —  Smart Money Concepts (SMC) System   ·   V1 FINAL
-//  Swing/Structure · BOS · CHoCH · Trend · MTF(1H/4H) · ATR+Volume filter ·
-//  Liquidity (EQH/EQL) · Liquidity-Sweep confidence · Adaptive Swing Length ·
-//  Signal Strength (0-100) · Auto object cleanup.
+//  Turhal AI PRO  —  Smart Money Concepts (SMC) System   ·   V2
+//  V1: Structure · BOS · CHoCH · Trend · MTF · ATR/Vol filter · EQH/EQL ·
+//      Liquidity-sweep grading · Adaptive swings · Signal Strength · cleanup
+//  V2: Order Blocks (structure-anchored, mitigation-tracked, confidence-scored)
 //  Author: berkayturhal38 | License: MPL-2.0
-//  Non-repaint: confirmed pivots; breaks commit on bar close; MTF lookahead_off.
+//  Non-repaint: confirmed pivots; breaks & OBs commit on bar close;
+//  MTF via lookahead_off; OB zones anchor to already-closed candles.
 // ============================================================================
-indicator("Turhal AI PRO — V1 FINAL", "Turhal AI PRO", overlay = true, max_lines_count = 500, max_labels_count = 500)
+indicator("Turhal AI PRO — V2", "Turhal AI PRO", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 100)
 
 // ============================================================================
 //  INPUTS
@@ -28,7 +29,7 @@ volLen  = input.int(20, "Volume MA Length", minval = 1, group = gF)
 volMult = input.float(1.2, "Min Volume / MA", minval = 0.0, step = 0.1, group = gF)
 
 gSw = "Liquidity Sweep"
-useSweep     = input.bool(true, "Grade BOS by Liquidity Sweep", group = gSw, tooltip = "A BOS that is NOT preceded by a liquidity sweep is graded LOW confidence.")
+useSweep      = input.bool(true, "Grade BOS by Liquidity Sweep", group = gSw)
 sweepLookback = input.int(15, "Sweep Lookback (bars)", minval = 1, group = gSw)
 
 gM = "Multi-Timeframe"
@@ -40,23 +41,46 @@ gL = "Liquidity (Equal Highs / Lows)"
 showEQ    = input.bool(true, "Show Equal Highs/Lows", group = gL)
 eqAtrMult = input.float(0.1, "Equal Tolerance / ATR", minval = 0.01, step = 0.05, group = gL)
 
+gOB = "Order Blocks (V2)"
+showOB    = input.bool(true, "Show Order Blocks", group = gOB)
+obBody    = input.bool(false, "Use Candle Body (else full range)", group = gOB)
+obMinAtr  = input.float(0.0, "Min OB Height / ATR", minval = 0.0, step = 0.1, group = gOB, tooltip = "Skip order blocks thinner than this (0 = off).")
+maxOB     = input.int(8, "Max Active Order Blocks", minval = 1, maxval = 20, group = gOB)
+obShowLbl = input.bool(true, "Show OB Confidence Label", group = gOB)
+obKeepMit = input.bool(true, "Keep Mitigated (faded)", group = gOB, tooltip = "Off = delete order blocks once price mitigates them.")
+obTransp  = input.int(82, "OB Transparency", minval = 0, maxval = 95, group = gOB)
+
 gO = "Performance"
-maxObj = input.int(80, "Max Drawn Objects (auto-clean)", minval = 10, maxval = 500, group = gO, tooltip = "Oldest lines/labels are auto-deleted beyond this count.")
+maxObj = input.int(80, "Max Drawn Objects (auto-clean)", minval = 10, maxval = 500, group = gO)
 
 gC = "Colors"
 bullCol  = input.color(#26a69a, "Bullish", group = gC)
 bearCol  = input.color(#ef5350, "Bearish", group = gC)
 swingCol = input.color(#787b86, "Swing Points", group = gC)
 eqCol    = input.color(#ffb300, "Liquidity (EQH/EQL)", group = gC)
+obBullC  = input.color(#26a69a, "Bullish OB", group = gC)
+obBearC  = input.color(#ef5350, "Bearish OB", group = gC)
 
 gD = "Dashboard"
 showDash = input.bool(true, "Show Dashboard", group = gD)
 
 // ============================================================================
-//  OBJECT POOLS  (auto cleanup — keeps well under TradingView limits)
+//  TYPES
 // ============================================================================
-var line[]  poolL = array.new<line>()
-var label[] poolB = array.new<label>()
+type OB
+    box   box
+    float top
+    float bot
+    int   dir        // 1 = bullish, -1 = bearish
+    bool  mitigated
+
+// ============================================================================
+//  OBJECT POOLS  (auto cleanup)
+// ============================================================================
+var line[]      poolL = array.new<line>()
+var label[]     poolB = array.new<label>()
+var array<OB>   obs   = array.new<OB>()
+
 regL(line ln) =>
     array.push(poolL, ln)
     if array.size(poolL) > maxObj
@@ -95,7 +119,7 @@ htf1 = request.security(syminfo.tickerid, htfTf1, f_trend(), lookahead = barmerg
 htf2 = request.security(syminfo.tickerid, htfTf2, f_trend(), lookahead = barmerge.lookahead_off)
 
 // ============================================================================
-//  VOLATILITY, FILTERS
+//  VOLATILITY & FILTERS
 // ============================================================================
 atrVal   = ta.atr(atrLen)
 bodySize = math.abs(close - open)
@@ -107,9 +131,7 @@ bullMTFok = not mtfFilter or (htf1 >= 0 and htf2 >= 0)
 bearMTFok = not mtfFilter or (htf1 <= 0 and htf2 <= 0)
 
 // ============================================================================
-//  ADAPTIVE SWING LENGTH  (3 fixed lengths selected by volatility regime)
-//  ta.pivot* needs a simple length, so lengths are input-derived (simple);
-//  only the SELECTION between them is volatility-driven (series).
+//  ADAPTIVE SWING LENGTH  (3 simple lengths, volatility-selected)
 // ============================================================================
 shortLen = math.max(2, int(swingLen * 0.5))
 midLen   = swingLen
@@ -144,8 +166,51 @@ var float dnLevel  = na
 var int   dnX      = na
 var bool  dnBroken = false
 var int   trend    = 0
-var int   sweepBullBar = na    // last sell-side sweep (supports bullish break)
-var int   sweepBearBar = na    // last buy-side sweep (supports bearish break)
+var int   sweepBullBar = na
+var int   sweepBearBar = na
+// last opposing candle (source of order blocks) — O(1) tracking
+var int   bearIdx = na
+var float bearHi  = na
+var float bearLo  = na
+var float bearBT  = na
+var float bearBB  = na
+var int   bullIdx = na
+var float bullHi  = na
+var float bullLo  = na
+var float bullBT  = na
+var float bullBB  = na
+
+if close < open
+    bearIdx := bar_index
+    bearHi  := high
+    bearLo  := low
+    bearBT  := open
+    bearBB  := close
+if close > open
+    bullIdx := bar_index
+    bullHi  := high
+    bullLo  := low
+    bullBT  := close
+    bullBB  := open
+
+// ============================================================================
+//  CONFIDENCE + OB HELPERS
+// ============================================================================
+f_obConf(int dir, float top, float bot, bool isCh) =>
+    imp = dir == 1 ? close - bot : top - close
+    dsc = (not na(atrVal) and atrVal > 0) ? math.min(50.0, math.max(0.0, imp) / atrVal * 15.0) : 0.0
+    msc = dir == 1 ? ((not na(htf1) and htf1 >= 0 ? 15.0 : 0.0) + (not na(htf2) and htf2 >= 0 ? 20.0 : 0.0)) : ((not na(htf1) and htf1 <= 0 ? 15.0 : 0.0) + (not na(htf2) and htf2 <= 0 ? 20.0 : 0.0))
+    csc = isCh ? 15.0 : 0.0
+    int(math.round(math.min(100.0, dsc + msc + csc)))
+
+f_addOB(int dir, float top, float bot, int x, int conf) =>
+    col = dir == 1 ? obBullC : obBearC
+    bx  = box.new(x, top, bar_index, bot, xloc = xloc.bar_index, extend = extend.right, bgcolor = color.new(col, obTransp), border_color = color.new(col, 35), border_width = 1)
+    if obShowLbl
+        regB(label.new(bar_index, (top + bot) / 2, "OB " + str.tostring(conf) + "%", xloc = xloc.bar_index, style = label.style_label_left, color = color.new(col, 25), textcolor = color.white, size = size.tiny))
+    array.push(obs, OB.new(bx, top, bot, dir, false))
+    if array.size(obs) > maxOB
+        box.delete(array.shift(obs).box)
 
 // ============================================================================
 //  MODULE 1 — SWING DETECTION + EQUAL HIGH/LOW LIQUIDITY
@@ -179,7 +244,7 @@ if not na(pl)
     dnBroken := false
 
 // ============================================================================
-//  LIQUIDITY SWEEP DETECTION  (wick beyond structure, close back inside)
+//  LIQUIDITY SWEEP DETECTION
 // ============================================================================
 if not na(dnLevel) and low < dnLevel and close > dnLevel
     sweepBullBar := bar_index
@@ -190,7 +255,24 @@ sweptBull = not na(sweepBullBar) and (bar_index - sweepBullBar) <= sweepLookback
 sweptBear = not na(sweepBearBar) and (bar_index - sweepBearBar) <= sweepLookback
 
 // ============================================================================
-//  MODULE 2 — MARKET STRUCTURE  (strong, MTF-aligned, sweep-graded BOS/CHoCH)
+//  MODULE 2b — ORDER BLOCK MITIGATION  (bounded loop over active OBs only)
+// ============================================================================
+if showOB and array.size(obs) > 0
+    for i = 0 to array.size(obs) - 1
+        o = array.get(obs, i)
+        if not o.mitigated
+            hit = o.dir == 1 ? low <= o.top : high >= o.bot
+            if hit
+                o.mitigated := true
+                if obKeepMit
+                    box.set_extend(o.box, extend.none)
+                    box.set_right(o.box, bar_index)
+                    box.set_bgcolor(o.box, color.new(o.dir == 1 ? obBullC : obBearC, math.min(95, obTransp + 12)))
+                else
+                    box.delete(o.box)
+
+// ============================================================================
+//  MODULE 2 — MARKET STRUCTURE  (BOS / CHoCH)  +  ORDER BLOCK CREATION
 // ============================================================================
 if not na(upLevel) and not upBroken and barstate.isconfirmed and close > upLevel and strong and bullMTFok
     upBroken := true
@@ -200,6 +282,11 @@ if not na(upLevel) and not upBroken and barstate.isconfirmed and close > upLevel
     if isChoch ? showCHOCH : showBOS
         regL(line.new(upX, upLevel, bar_index, upLevel, xloc = xloc.bar_index, color = bullCol, width = 2, style = isChoch ? line.style_dashed : line.style_solid))
         regB(label.new(bar_index, upLevel, (isChoch ? "CHoCH" : "BOS") + (lowConf ? " ?" : ""), xloc = xloc.bar_index, style = label.style_label_down, color = color.new(bullCol, lowConf ? 55 : 15), textcolor = color.white, size = size.small))
+    if showOB and not na(bearLo) and not na(bearHi)
+        obTop = obBody ? bearBT : bearHi
+        obBot = obBody ? bearBB : bearLo
+        if na(atrVal) or (obTop - obBot) >= atrVal * obMinAtr
+            f_addOB(1, obTop, obBot, bearIdx, f_obConf(1, obTop, obBot, isChoch))
 
 if not na(dnLevel) and not dnBroken and barstate.isconfirmed and close < dnLevel and strong and bearMTFok
     dnBroken := true
@@ -209,9 +296,14 @@ if not na(dnLevel) and not dnBroken and barstate.isconfirmed and close < dnLevel
     if isChoch ? showCHOCH : showBOS
         regL(line.new(dnX, dnLevel, bar_index, dnLevel, xloc = xloc.bar_index, color = bearCol, width = 2, style = isChoch ? line.style_dashed : line.style_solid))
         regB(label.new(bar_index, dnLevel, (isChoch ? "CHoCH" : "BOS") + (lowConf ? " ?" : ""), xloc = xloc.bar_index, style = label.style_label_up, color = color.new(bearCol, lowConf ? 55 : 15), textcolor = color.white, size = size.small))
+    if showOB and not na(bullLo) and not na(bullHi)
+        obTop = obBody ? bullBT : bullHi
+        obBot = obBody ? bullBB : bullLo
+        if na(atrVal) or (obTop - obBot) >= atrVal * obMinAtr
+            f_addOB(-1, obTop, obBot, bullIdx, f_obConf(-1, obTop, obBot, isChoch))
 
 // ============================================================================
-//  SIGNAL STRENGTH  (0-100 from Trend/MTF + ATR + Volume + Sweep)
+//  SIGNAL STRENGTH  (0-100)
 // ============================================================================
 supSweep = trend == 1 ? sweptBull : trend == -1 ? sweptBear : false
 sMTF = trend == 0 ? 0.0 : ((not na(htf1) and htf1 == trend) ? 20.0 : 0.0) + ((not na(htf2) and htf2 == trend) ? 30.0 : 0.0)
@@ -232,7 +324,7 @@ if showDash and barstate.islast
     kb = color.new(color.black, 25)
     scCol = score >= 70 ? bullCol : score >= 40 ? #ffb300 : color.gray
     table.cell(dash, 0, 0, "Turhal AI PRO", text_color = color.white, bgcolor = hd, text_size = size.small)
-    table.cell(dash, 1, 0, "V1 FINAL", text_color = color.white, bgcolor = hd, text_size = size.small)
+    table.cell(dash, 1, 0, "V2", text_color = color.white, bgcolor = hd, text_size = size.small)
     table.cell(dash, 0, 1, "Trend", text_color = color.white, bgcolor = kb, text_size = size.small)
     table.cell(dash, 1, 1, f_trTxt(trend), text_color = color.white, bgcolor = color.new(f_trCol(trend), 25), text_size = size.small)
     table.cell(dash, 0, 2, "1H", text_color = color.white, bgcolor = kb, text_size = size.small)
