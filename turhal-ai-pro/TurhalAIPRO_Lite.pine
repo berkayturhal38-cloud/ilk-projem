@@ -1,0 +1,183 @@
+//@version=6
+// ============================================================================
+//  Turhal AI PRO — Lite   (flat / mobile-safe: no if/for/blocks)
+//  SMC essentials: swings, BOS/CHoCH, trend, MTF bias, premium/discount,
+//  entry arrows with 0-100 confidence, dashboard, alerts. Non-repaint:
+//  confirmed pivots + barstate.isconfirmed + MTF lookahead_off.
+//  Author: berkayturhal38 | License: MPL-2.0
+// ============================================================================
+indicator("Turhal AI PRO — Lite", "Turhal AI PRO Lite", overlay = true, max_lines_count = 500, max_labels_count = 500)
+
+// ---- INPUTS -----------------------------------------------------------------
+gS = "Structure"
+swingLen   = input.int(10, "Swing Length", minval = 2, maxval = 100, group = gS)
+showSwings = input.bool(true, "Show Swing HH/LL", group = gS)
+showBreaks = input.bool(true, "Show BOS / CHoCH", group = gS)
+
+gF = "Filters"
+useATR  = input.bool(true, "ATR Strong-Break Filter", group = gF)
+atrLen  = input.int(14, "ATR Length", minval = 1, group = gF)
+atrMult = input.float(0.7, "Min Body / ATR", minval = 0.0, step = 0.1, group = gF)
+useVol  = input.bool(true, "Volume Filter", group = gF)
+volLen  = input.int(20, "Volume MA Length", minval = 1, group = gF)
+volMult = input.float(1.2, "Min Volume / MA", minval = 0.0, step = 0.1, group = gF)
+
+gM = "Multi-Timeframe"
+mtfFilter = input.bool(true, "Require MTF bias alignment", group = gM)
+htfTf1    = input.timeframe("60",  "Higher Timeframe 1", group = gM)
+htfTf2    = input.timeframe("240", "Higher Timeframe 2", group = gM)
+emaLen    = input.int(50, "HTF EMA Length", minval = 1, group = gM)
+
+gPD = "Premium / Discount"
+showPD = input.bool(true, "Show Premium/Discount zone", group = gPD)
+
+gE = "Entry Engine"
+showEntry      = input.bool(true, "Show Entry Arrows", group = gE)
+entryThreshold = input.int(70, "Min Confidence (%)", minval = 0, maxval = 100, group = gE)
+needDiscount   = input.bool(true, "Longs in Discount / Shorts in Premium", group = gE)
+slAtrMult      = input.float(1.0, "SL ATR Buffer", minval = 0.0, step = 0.1, group = gE)
+rrTgt          = input.float(2.0, "Target R (for label)", minval = 0.1, step = 0.1, group = gE)
+
+gC = "Colors"
+bullCol  = input.color(#26a69a, "Bullish", group = gC)
+bearCol  = input.color(#ef5350, "Bearish", group = gC)
+swingCol = input.color(#787b86, "Swing", group = gC)
+premCol  = input.color(#ef5350, "Premium", group = gC)
+discCol  = input.color(#26a69a, "Discount", group = gC)
+
+// ---- SINGLE-LINE HELPERS ----------------------------------------------------
+f_trTxt(int t) => t == 1 ? "BULLISH" : t == -1 ? "BEARISH" : "NEUTRAL"
+f_trCol(int t) => t == 1 ? bullCol : t == -1 ? bearCol : color.gray
+f_biasTxt(bool b) => b ? "BULLISH" : "BEARISH"
+f_biasCol(bool b) => b ? bullCol : bearCol
+
+// ---- VOLATILITY & FILTERS ---------------------------------------------------
+atrVal   = ta.atr(atrLen)
+bodySize = math.abs(close - open)
+volMA    = ta.sma(volume, volLen)
+atrOK    = not useATR or (not na(atrVal) and bodySize >= atrVal * atrMult)
+volOK    = not useVol or na(volume) or (not na(volMA) and volume >= volMA * volMult)
+strong   = atrOK and volOK
+
+// ---- MULTI-TIMEFRAME BIAS (flat, non-repaint) -------------------------------
+htf1Bull = request.security(syminfo.tickerid, htfTf1, close > ta.ema(close, emaLen), lookahead = barmerge.lookahead_off)
+htf2Bull = request.security(syminfo.tickerid, htfTf2, close > ta.ema(close, emaLen), lookahead = barmerge.lookahead_off)
+bullMTFok = not mtfFilter or (htf1Bull and htf2Bull)
+bearMTFok = not mtfFilter or (not htf1Bull and not htf2Bull)
+
+// ---- SWINGS (confirmed pivots) ---------------------------------------------
+ph = ta.pivothigh(swingLen, swingLen)
+pl = ta.pivotlow(swingLen, swingLen)
+var float lastPH = na
+var int   lastPHx = na
+var float lastPL = na
+var int   lastPLx = na
+lastPH  := na(ph) ? lastPH : ph
+lastPHx := na(ph) ? lastPHx : bar_index - swingLen
+lastPL  := na(pl) ? lastPL : pl
+lastPLx := na(pl) ? lastPLx : bar_index - swingLen
+
+plotshape(showSwings and not na(ph), title = "Swing High", style = shape.triangledown, location = location.abovebar, color = swingCol, offset = -swingLen, size = size.tiny)
+plotshape(showSwings and not na(pl), title = "Swing Low",  style = shape.triangleup,   location = location.belowbar, color = swingCol, offset = -swingLen, size = size.tiny)
+
+// ---- MARKET STRUCTURE: BOS / CHoCH (flat state machine) ---------------------
+var float upLevel = na
+var bool  upBroken = false
+var float dnLevel = na
+var bool  dnBroken = false
+var int   trend = 0
+upLevel  := na(ph) ? upLevel : ph
+upBroken := na(ph) ? upBroken : false
+dnLevel  := na(pl) ? dnLevel : pl
+dnBroken := na(pl) ? dnBroken : false
+
+bullBreak = not na(upLevel) and not upBroken and barstate.isconfirmed and close > upLevel and strong and bullMTFok
+bearBreak = not na(dnLevel) and not dnBroken and barstate.isconfirmed and close < dnLevel and strong and bearMTFok
+isChochUp = bullBreak and trend == -1
+isChochDn = bearBreak and trend == 1
+upBroken := bullBreak ? true : upBroken
+dnBroken := bearBreak ? true : dnBroken
+trend    := bullBreak ? 1 : bearBreak ? -1 : trend
+
+plotshape(showBreaks and bullBreak and not isChochUp, title = "BOS Up",   style = shape.triangleup,   location = location.belowbar, color = bullCol,     text = "BOS",   textcolor = color.white, size = size.tiny)
+plotshape(showBreaks and bearBreak and not isChochDn, title = "BOS Down", style = shape.triangledown, location = location.abovebar, color = bearCol,     text = "BOS",   textcolor = color.white, size = size.tiny)
+plotshape(showBreaks and isChochUp, title = "CHoCH Up",   style = shape.diamond, location = location.belowbar, color = color.yellow, text = "CHoCH", textcolor = color.white, size = size.tiny)
+plotshape(showBreaks and isChochDn, title = "CHoCH Down", style = shape.diamond, location = location.abovebar, color = color.yellow, text = "CHoCH", textcolor = color.white, size = size.tiny)
+
+// ---- PREMIUM / DISCOUNT -----------------------------------------------------
+pdEq = (not na(lastPH) and not na(lastPL)) ? (lastPH + lastPL) / 2 : na
+inDiscount = not na(pdEq) and close < pdEq
+inPremium  = not na(pdEq) and close > pdEq
+pHi = plot(showPD ? lastPH : na, "Range High", color = color.new(premCol, 55), style = plot.style_linebr)
+pEq = plot(showPD ? pdEq   : na, "Equilibrium", color = color.new(color.gray, 30), style = plot.style_linebr)
+pLo = plot(showPD ? lastPL : na, "Range Low", color = color.new(discCol, 55), style = plot.style_linebr)
+fill(pHi, pEq, color = color.new(premCol, 90), title = "Premium")
+fill(pEq, pLo, color = color.new(discCol, 90), title = "Discount")
+
+// ---- CONFIDENCE 0-100 (flat) -----------------------------------------------
+mBull = (htf1Bull ? 15.0 : 0.0) + (htf2Bull ? 20.0 : 0.0)
+mBear = ((not htf1Bull) ? 15.0 : 0.0) + ((not htf2Bull) ? 20.0 : 0.0)
+dStr  = (not na(atrVal) and atrVal > 0) ? math.min(30.0, bodySize / atrVal * 20.0) : 0.0
+vStr  = (not na(volume) and not na(volMA) and volMA > 0) ? math.min(20.0, volume / volMA * 10.0) : 0.0
+confBull = math.min(100, int(math.round(mBull + dStr + vStr + (inDiscount ? 15.0 : 0.0))))
+confBear = math.min(100, int(math.round(mBear + dStr + vStr + (inPremium  ? 15.0 : 0.0))))
+
+// ---- ENTRY ENGINE -----------------------------------------------------------
+slL = (na(lastPL) ? low : math.min(lastPL, low)) - (na(atrVal) ? 0.0 : atrVal * slAtrMult)
+slS = (na(lastPH) ? high : math.max(lastPH, high)) + (na(atrVal) ? 0.0 : atrVal * slAtrMult)
+riskL = close - slL
+riskS = slS - close
+longSig  = showEntry and bullBreak and (not needDiscount or inDiscount) and confBull >= entryThreshold and riskL > 0
+shortSig = showEntry and bearBreak and (not needDiscount or inPremium)  and confBear >= entryThreshold and riskS > 0
+tpL = close + riskL * rrTgt
+tpS = close - riskS * rrTgt
+
+plotshape(longSig,  title = "LONG",  style = shape.labelup,   location = location.belowbar, color = bullCol, text = "LONG",  textcolor = color.white, size = size.small)
+plotshape(shortSig, title = "SHORT", style = shape.labeldown, location = location.abovebar, color = bearCol, text = "SHORT", textcolor = color.white, size = size.small)
+
+var float lastSL = na
+var float lastTP = na
+var int   lastDir = 0
+var int   lastConf = 0
+lastSL   := longSig ? slL : shortSig ? slS : lastSL
+lastTP   := longSig ? tpL : shortSig ? tpS : lastTP
+lastDir  := longSig ? 1 : shortSig ? -1 : lastDir
+lastConf := longSig ? confBull : shortSig ? confBear : lastConf
+
+// ---- ALERTS -----------------------------------------------------------------
+alertcondition(longSig,  "LONG Setup",  "Turhal AI PRO Lite: high-quality LONG setup")
+alertcondition(shortSig, "SHORT Setup", "Turhal AI PRO Lite: high-quality SHORT setup")
+alertcondition(bullBreak, "Bullish BOS/CHoCH", "Turhal AI PRO Lite: bullish structure break")
+alertcondition(bearBreak, "Bearish BOS/CHoCH", "Turhal AI PRO Lite: bearish structure break")
+
+// ---- SIGNAL STRENGTH (trend quality) ---------------------------------------
+sMTF = trend == 0 ? 0.0 : (((trend == 1 and htf1Bull) or (trend == -1 and not htf1Bull)) ? 20.0 : 0.0) + (((trend == 1 and htf2Bull) or (trend == -1 and not htf2Bull)) ? 30.0 : 0.0)
+sATR = (not na(atrVal) and atrVal > 0) ? math.min(25.0, bodySize / atrVal * 15.0) : 0.0
+sVOL = (not na(volume) and not na(volMA) and volMA > 0) ? math.min(25.0, volume / volMA * 12.0) : 0.0
+score = math.min(100, int(math.round(sMTF + sATR + sVOL)))
+
+// ---- DASHBOARD (flat: unconditional cells) ---------------------------------
+scCol = score >= 70 ? bullCol : score >= 40 ? color.new(#ffb300, 0) : color.gray
+zoneTxt = na(pdEq) ? "-" : inDiscount ? "DISCOUNT" : "PREMIUM"
+zoneCol = na(pdEq) ? color.gray : inDiscount ? discCol : premCol
+setupTxt = lastDir == 0 ? "-" : (lastDir == 1 ? "LONG " : "SHORT ") + str.tostring(lastConf) + "%"
+setupCol = lastDir == 1 ? bullCol : lastDir == -1 ? bearCol : color.gray
+hd = color.new(color.black, 10)
+kb = color.new(color.black, 25)
+var table dash = table.new(position.top_right, 2, 8, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+table.cell(dash, 0, 0, "Turhal AI PRO", text_color = color.white, bgcolor = hd, text_size = size.small)
+table.cell(dash, 1, 0, "Lite", text_color = color.white, bgcolor = hd, text_size = size.small)
+table.cell(dash, 0, 1, "Trend", text_color = color.white, bgcolor = kb, text_size = size.small)
+table.cell(dash, 1, 1, f_trTxt(trend), text_color = color.white, bgcolor = color.new(f_trCol(trend), 25), text_size = size.small)
+table.cell(dash, 0, 2, "1H", text_color = color.white, bgcolor = kb, text_size = size.small)
+table.cell(dash, 1, 2, f_biasTxt(htf1Bull), text_color = color.white, bgcolor = color.new(f_biasCol(htf1Bull), 25), text_size = size.small)
+table.cell(dash, 0, 3, "4H", text_color = color.white, bgcolor = kb, text_size = size.small)
+table.cell(dash, 1, 3, f_biasTxt(htf2Bull), text_color = color.white, bgcolor = color.new(f_biasCol(htf2Bull), 25), text_size = size.small)
+table.cell(dash, 0, 4, "Zone", text_color = color.white, bgcolor = kb, text_size = size.small)
+table.cell(dash, 1, 4, zoneTxt, text_color = color.white, bgcolor = color.new(zoneCol, 25), text_size = size.small)
+table.cell(dash, 0, 5, "Signal", text_color = color.white, bgcolor = kb, text_size = size.small)
+table.cell(dash, 1, 5, str.tostring(score) + " %", text_color = color.white, bgcolor = color.new(scCol, 20), text_size = size.small)
+table.cell(dash, 0, 6, "Setup", text_color = color.white, bgcolor = kb, text_size = size.small)
+table.cell(dash, 1, 6, setupTxt, text_color = color.white, bgcolor = color.new(setupCol, 25), text_size = size.small)
+table.cell(dash, 0, 7, "SL / TP", text_color = color.white, bgcolor = kb, text_size = size.tiny)
+table.cell(dash, 1, 7, na(lastSL) ? "-" : str.tostring(lastSL, format.mintick) + " / " + str.tostring(lastTP, format.mintick), text_color = color.white, bgcolor = kb, text_size = size.tiny)
