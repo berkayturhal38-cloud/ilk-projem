@@ -1,0 +1,160 @@
+//@version=6
+// Turhal Fib Retracement (2-point, like the classic tool) — flat / mobile-safe
+// Place two points on the chart (time+price) and drag them. Author: berkayturhal38
+indicator("Turhal Fib Retracement", "Turhal Fib RT", overlay=true, max_lines_count=40, max_labels_count=40, max_boxes_count=20)
+
+gp = "Points (click / drag on chart)"
+t1 = input.time(timestamp("2024-01-01 00:00 +0000"), "Point 1 = 100%", confirm=true, group=gp)
+p1 = input.price(50.0, "Point 1 = 100%", confirm=true, group=gp)
+t2 = input.time(timestamp("2024-02-01 00:00 +0000"), "Point 2 = 0%", confirm=true, group=gp)
+p2 = input.price(100.0, "Point 2 = 0%", confirm=true, group=gp)
+
+gs = "Style"
+extMode = input.string("Right", "Extend", options=["Right", "Both", "Left", "None"], group=gs)
+reverse = input.bool(false, "Reverse", group=gs)
+lineW = input.int(1, "Line Width", minval=1, maxval=4, group=gs)
+showFill = input.bool(true, "Fill Zones", group=gs)
+fillT = input.int(85, "Zone Transparency", minval=50, maxval=98, group=gs)
+showConn = input.bool(true, "Trend Line", group=gs)
+showLbl = input.bool(true, "Show Labels", group=gs)
+showExt = input.bool(false, "Show Extensions (1.272 / 1.618 / 2.618)", group=gs)
+
+gc = "Colors"
+c0 = input.color(#787b86, "0.0", group=gc)
+c236 = input.color(#f23645, "0.236", group=gc)
+c382 = input.color(#ff9800, "0.382", group=gc)
+c5 = input.color(#4caf50, "0.5", group=gc)
+c618 = input.color(#00bcd4, "0.618", group=gc)
+c786 = input.color(#2962ff, "0.786", group=gc)
+c1 = input.color(#787b86, "1.0", group=gc)
+goldCol = input.color(#ffd700, "Golden Zone", group=gc)
+ceCol = input.color(#e91e63, "Extensions", group=gc)
+
+extV = extMode == "Both" ? extend.both : extMode == "Left" ? extend.left : extMode == "None" ? extend.none : extend.right
+aa = reverse ? p1 : p2
+bb = reverse ? p2 : p1
+rng = bb - aa
+tL = t1 < t2 ? t1 : t2
+tR = t1 < t2 ? t2 : t1
+goldT = fillT - 25 < 45 ? 45 : fillT - 25
+
+lp0 = aa + rng * 0.0
+lp236 = aa + rng * 0.236
+lp382 = aa + rng * 0.382
+lp5 = aa + rng * 0.5
+lp618 = aa + rng * 0.618
+lp786 = aa + rng * 0.786
+lp1 = aa + rng * 1.0
+le1 = showExt ? aa + rng * 1.272 : na
+le2 = showExt ? aa + rng * 1.618 : na
+le3 = showExt ? aa + rng * 2.618 : na
+
+var box z1 = box.new(na, na, na, na, xloc=xloc.bar_time, border_color=color.new(color.gray, 100))
+var box z2 = box.new(na, na, na, na, xloc=xloc.bar_time, border_color=color.new(color.gray, 100))
+var box z3 = box.new(na, na, na, na, xloc=xloc.bar_time, border_color=color.new(color.gray, 100))
+var box z4 = box.new(na, na, na, na, xloc=xloc.bar_time, border_color=color.new(color.gray, 100))
+var box z5 = box.new(na, na, na, na, xloc=xloc.bar_time, border_color=color.new(color.gray, 100))
+var box z6 = box.new(na, na, na, na, xloc=xloc.bar_time, border_color=color.new(color.gray, 100))
+
+box.set_extend(z1, extV)
+box.set_lefttop(z1, tL, showFill ? math.max(lp0, lp236) : na)
+box.set_rightbottom(z1, tR, showFill ? math.min(lp0, lp236) : na)
+box.set_bgcolor(z1, color.new(c236, fillT))
+box.set_extend(z2, extV)
+box.set_lefttop(z2, tL, showFill ? math.max(lp236, lp382) : na)
+box.set_rightbottom(z2, tR, showFill ? math.min(lp236, lp382) : na)
+box.set_bgcolor(z2, color.new(c382, fillT))
+box.set_extend(z3, extV)
+box.set_lefttop(z3, tL, showFill ? math.max(lp382, lp5) : na)
+box.set_rightbottom(z3, tR, showFill ? math.min(lp382, lp5) : na)
+box.set_bgcolor(z3, color.new(c5, fillT))
+box.set_extend(z4, extV)
+box.set_lefttop(z4, tL, showFill ? math.max(lp5, lp618) : na)
+box.set_rightbottom(z4, tR, showFill ? math.min(lp5, lp618) : na)
+box.set_bgcolor(z4, color.new(c618, fillT))
+box.set_extend(z5, extV)
+box.set_lefttop(z5, tL, showFill ? math.max(lp618, lp786) : na)
+box.set_rightbottom(z5, tR, showFill ? math.min(lp618, lp786) : na)
+box.set_bgcolor(z5, color.new(goldCol, goldT))
+box.set_extend(z6, extV)
+box.set_lefttop(z6, tL, showFill ? math.max(lp786, lp1) : na)
+box.set_rightbottom(z6, tR, showFill ? math.min(lp786, lp1) : na)
+box.set_bgcolor(z6, color.new(c1, fillT))
+
+var line l0 = line.new(na, na, na, na, xloc=xloc.bar_time, color=c0, width=lineW)
+var line l236 = line.new(na, na, na, na, xloc=xloc.bar_time, color=c236, width=lineW)
+var line l382 = line.new(na, na, na, na, xloc=xloc.bar_time, color=c382, width=lineW)
+var line l5 = line.new(na, na, na, na, xloc=xloc.bar_time, color=c5, width=lineW)
+var line l618 = line.new(na, na, na, na, xloc=xloc.bar_time, color=c618, width=lineW + 1)
+var line l786 = line.new(na, na, na, na, xloc=xloc.bar_time, color=c786, width=lineW)
+var line l1 = line.new(na, na, na, na, xloc=xloc.bar_time, color=c1, width=lineW)
+var line le1l = line.new(na, na, na, na, xloc=xloc.bar_time, color=ceCol, width=lineW, style=line.style_dashed)
+var line le2l = line.new(na, na, na, na, xloc=xloc.bar_time, color=ceCol, width=lineW, style=line.style_dashed)
+var line le3l = line.new(na, na, na, na, xloc=xloc.bar_time, color=ceCol, width=lineW, style=line.style_dashed)
+
+line.set_extend(l0, extV)
+line.set_xy1(l0, tL, lp0)
+line.set_xy2(l0, tR, lp0)
+line.set_extend(l236, extV)
+line.set_xy1(l236, tL, lp236)
+line.set_xy2(l236, tR, lp236)
+line.set_extend(l382, extV)
+line.set_xy1(l382, tL, lp382)
+line.set_xy2(l382, tR, lp382)
+line.set_extend(l5, extV)
+line.set_xy1(l5, tL, lp5)
+line.set_xy2(l5, tR, lp5)
+line.set_extend(l618, extV)
+line.set_xy1(l618, tL, lp618)
+line.set_xy2(l618, tR, lp618)
+line.set_extend(l786, extV)
+line.set_xy1(l786, tL, lp786)
+line.set_xy2(l786, tR, lp786)
+line.set_extend(l1, extV)
+line.set_xy1(l1, tL, lp1)
+line.set_xy2(l1, tR, lp1)
+line.set_extend(le1l, extV)
+line.set_xy1(le1l, tL, le1)
+line.set_xy2(le1l, tR, le1)
+line.set_extend(le2l, extV)
+line.set_xy1(le2l, tL, le2)
+line.set_xy2(le2l, tR, le2)
+line.set_extend(le3l, extV)
+line.set_xy1(le3l, tL, le3)
+line.set_xy2(le3l, tR, le3)
+
+var line conn = line.new(na, na, na, na, xloc=xloc.bar_time, color=color.new(color.gray, 0), width=1, style=line.style_dashed)
+line.set_xy1(conn, showConn ? t1 : na, showConn ? p1 : na)
+line.set_xy2(conn, showConn ? t2 : na, showConn ? p2 : na)
+
+var label b0 = label.new(na, na, "", xloc=xloc.bar_time, style=label.style_label_left, color=color.new(color.black, 20), textcolor=c0, size=size.small)
+var label b236 = label.new(na, na, "", xloc=xloc.bar_time, style=label.style_label_left, color=color.new(color.black, 20), textcolor=c236, size=size.small)
+var label b382 = label.new(na, na, "", xloc=xloc.bar_time, style=label.style_label_left, color=color.new(color.black, 20), textcolor=c382, size=size.small)
+var label b5 = label.new(na, na, "", xloc=xloc.bar_time, style=label.style_label_left, color=color.new(color.black, 20), textcolor=c5, size=size.small)
+var label b618 = label.new(na, na, "", xloc=xloc.bar_time, style=label.style_label_left, color=color.new(color.black, 20), textcolor=c618, size=size.small)
+var label b786 = label.new(na, na, "", xloc=xloc.bar_time, style=label.style_label_left, color=color.new(color.black, 20), textcolor=c786, size=size.small)
+var label b1 = label.new(na, na, "", xloc=xloc.bar_time, style=label.style_label_left, color=color.new(color.black, 20), textcolor=c1, size=size.small)
+var label be1b = label.new(na, na, "", xloc=xloc.bar_time, style=label.style_label_left, color=color.new(color.black, 20), textcolor=ceCol, size=size.small)
+var label be2b = label.new(na, na, "", xloc=xloc.bar_time, style=label.style_label_left, color=color.new(color.black, 20), textcolor=ceCol, size=size.small)
+var label be3b = label.new(na, na, "", xloc=xloc.bar_time, style=label.style_label_left, color=color.new(color.black, 20), textcolor=ceCol, size=size.small)
+
+label.set_xy(b0, tR, lp0)
+label.set_text(b0, showLbl ? "0.0  " + str.tostring(lp0, format.mintick) : "")
+label.set_xy(b236, tR, lp236)
+label.set_text(b236, showLbl ? "0.236  " + str.tostring(lp236, format.mintick) : "")
+label.set_xy(b382, tR, lp382)
+label.set_text(b382, showLbl ? "0.382  " + str.tostring(lp382, format.mintick) : "")
+label.set_xy(b5, tR, lp5)
+label.set_text(b5, showLbl ? "0.5  " + str.tostring(lp5, format.mintick) : "")
+label.set_xy(b618, tR, lp618)
+label.set_text(b618, showLbl ? "0.618  " + str.tostring(lp618, format.mintick) : "")
+label.set_xy(b786, tR, lp786)
+label.set_text(b786, showLbl ? "0.786  " + str.tostring(lp786, format.mintick) : "")
+label.set_xy(b1, tR, lp1)
+label.set_text(b1, showLbl ? "1.0  " + str.tostring(lp1, format.mintick) : "")
+label.set_xy(be1b, tR, le1)
+label.set_text(be1b, showLbl and not na(le1) ? "1.272  " + str.tostring(le1, format.mintick) : "")
+label.set_xy(be2b, tR, le2)
+label.set_text(be2b, showLbl and not na(le2) ? "1.618  " + str.tostring(le2, format.mintick) : "")
+label.set_xy(be3b, tR, le3)
+label.set_text(be3b, showLbl and not na(le3) ? "2.618  " + str.tostring(le3, format.mintick) : "")
