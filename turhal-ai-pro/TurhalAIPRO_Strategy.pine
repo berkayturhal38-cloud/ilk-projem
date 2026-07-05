@@ -1,15 +1,17 @@
 //@version=6
 // ============================================================================
-//  Turhal AI PRO  —  Smart Money Concepts (SMC) System   ·   V3
-//  Structure(BOS/CHoCH) · Trend · MTF · ATR/Vol filters · EQH/EQL ·
-//  Liquidity-sweep grading · Adaptive swings · Order Blocks · Fair Value Gaps ·
-//  OB/FVG confluence · Premium/Discount · Entry Engine (SL/TP1-3, RR, 0-100
-//  confidence) · High-quality alerts · Object auto-cleanup.
+//  Turhal AI PRO  —  SMC System   ·   V3   ·   STRATEGY (Backtest)
+//  Same engine as the indicator: Structure(BOS/CHoCH) · Trend · MTF ·
+//  ATR/Vol filters · EQH/EQL · Liquidity sweep · Adaptive swings · Order
+//  Blocks · Fair Value Gaps · Premium/Discount · Entry Engine (SL/TP1-3, RR,
+//  0-100 confidence) — wired into strategy.entry / strategy.exit with a
+//  live backtest metrics panel (Win Rate, Profit Factor, Net Profit,
+//  Max Drawdown, Expectancy, trades).
 //  Author: berkayturhal38 | License: MPL-2.0
-//  NON-REPAINT: confirmed pivots; every signal commits on bar close
-//  (barstate.isconfirmed); MTF via lookahead_off; zones anchor to closed bars.
+//  NON-REPAINT: confirmed pivots; signals commit on bar close
+//  (barstate.isconfirmed); MTF via lookahead_off; process_orders_on_close.
 // ============================================================================
-indicator("Turhal AI PRO — V3", "Turhal AI PRO", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 200)
+strategy("Turhal AI PRO — V3 Strategy", "Turhal AI PRO ST", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 200, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 100, commission_type = strategy.commission.percent, commission_value = 0.04, pyramiding = 0, calc_on_every_tick = false, process_orders_on_close = true, close_entries_rule = "ANY")
 
 // ============================================================================
 //  INPUTS
@@ -71,6 +73,13 @@ rr1 = input.float(1.0, "TP1 (R)", minval = 0.1, step = 0.1, group = gE)
 rr2 = input.float(2.0, "TP2 (R)", minval = 0.1, step = 0.1, group = gE)
 rr3 = input.float(3.0, "TP3 (R)", minval = 0.1, step = 0.1, group = gE)
 alertsHi = input.bool(true, "Alerts (high-quality only)", group = gE)
+
+gBT = "Backtest / Risk"
+tp1Pct   = input.int(40, "TP1 close %", minval = 1, maxval = 100, group = gBT)
+tp2Pct   = input.int(30, "TP2 close %", minval = 1, maxval = 100, group = gBT)
+useBE    = input.bool(true, "Move SL to break-even after TP1", group = gBT)
+tradeDir = input.string("Both", "Allowed Direction", options = ["Both", "Long Only", "Short Only"], group = gBT)
+showMetrics = input.bool(true, "Show Backtest Metrics", group = gBT)
 
 gO = "Performance"
 maxObj = input.int(120, "Max Drawn Objects (auto-clean)", minval = 10, maxval = 500, group = gO)
@@ -399,7 +408,19 @@ longEntry  = false
 shortEntry = false
 var int lastEntryBar = na
 
-longOK = showEntry and bullBreak and (not needDiscount or inDiscount) and (not needConfluence or confBull) and (na(lastEntryBar) or bar_index > lastEntryBar)
+// Strategy position state (for exit ladder + break-even)
+var float posEntry = na
+var float posSL    = na
+var float posT1    = na
+var float posT2    = na
+var float posT3    = na
+var bool  beDone   = false
+
+allowLong  = tradeDir != "Short Only"
+allowShort = tradeDir != "Long Only"
+flat       = strategy.position_size == 0
+
+longOK = showEntry and allowLong and flat and bullBreak and (not needDiscount or inDiscount) and (not needConfluence or confBull) and (na(lastEntryBar) or bar_index > lastEntryBar)
 if longOK
     conf = f_confLong()
     slL  = (na(lastPL) ? low : math.min(lastPL, low)) - (na(atrVal) ? 0.0 : atrVal * slAtrMult)
@@ -411,8 +432,18 @@ if longOK
         t2 = close + riskL * rr2
         t3 = close + riskL * rr3
         f_drawTrade(1, close, slL, t1, t2, t3, conf, rr2)
+        posEntry := close
+        posSL := slL
+        posT1 := t1
+        posT2 := t2
+        posT3 := t3
+        beDone := false
+        strategy.entry("Long", strategy.long)
+        strategy.exit("L-TP1", "Long", qty_percent = tp1Pct, stop = slL, limit = t1)
+        strategy.exit("L-TP2", "Long", qty_percent = tp2Pct, stop = slL, limit = t2)
+        strategy.exit("L-TP3", "Long", stop = slL, limit = t3)
 
-shortOK = showEntry and bearBreak and (not needDiscount or inPremium) and (not needConfluence or confBear) and (na(lastEntryBar) or bar_index > lastEntryBar)
+shortOK = showEntry and allowShort and flat and bearBreak and (not needDiscount or inPremium) and (not needConfluence or confBear) and (na(lastEntryBar) or bar_index > lastEntryBar)
 if shortOK
     conf = f_confShort()
     slS  = (na(lastPH) ? high : math.max(lastPH, high)) + (na(atrVal) ? 0.0 : atrVal * slAtrMult)
@@ -424,6 +455,28 @@ if shortOK
         t2 = close - riskS * rr2
         t3 = close - riskS * rr3
         f_drawTrade(-1, close, slS, t1, t2, t3, conf, rr2)
+        posEntry := close
+        posSL := slS
+        posT1 := t1
+        posT2 := t2
+        posT3 := t3
+        beDone := false
+        strategy.entry("Short", strategy.short)
+        strategy.exit("S-TP1", "Short", qty_percent = tp1Pct, stop = slS, limit = t1)
+        strategy.exit("S-TP2", "Short", qty_percent = tp2Pct, stop = slS, limit = t2)
+        strategy.exit("S-TP3", "Short", stop = slS, limit = t3)
+
+// Break-even: after TP1 is reached, pull the stop on the runners to entry.
+if strategy.position_size > 0 and useBE and not beDone and not na(posT1) and high >= posT1
+    beDone := true
+    strategy.exit("L-TP2", "Long", qty_percent = tp2Pct, stop = posEntry, limit = posT2)
+    strategy.exit("L-TP3", "Long", stop = posEntry, limit = posT3)
+if strategy.position_size < 0 and useBE and not beDone and not na(posT1) and low <= posT1
+    beDone := true
+    strategy.exit("S-TP2", "Short", qty_percent = tp2Pct, stop = posEntry, limit = posT2)
+    strategy.exit("S-TP3", "Short", stop = posEntry, limit = posT3)
+if flat
+    beDone := false
 
 // ============================================================================
 //  ALERTS  (high-quality entries only)
@@ -468,3 +521,49 @@ if showDash and barstate.islast
     table.cell(dash, 1, 4, pdTxt, text_color = color.white, bgcolor = color.new(pdC, 25), text_size = size.small)
     table.cell(dash, 0, 5, "Signal", text_color = color.white, bgcolor = kb, text_size = size.small)
     table.cell(dash, 1, 5, str.tostring(score) + " %", text_color = color.white, bgcolor = color.new(scCol, 20), text_size = size.small)
+
+// ============================================================================
+//  BACKTEST METRICS PANEL
+// ============================================================================
+f_money(float v) =>
+    a = math.abs(v)
+    s = v < 0 ? "-" : ""
+    a >= 1e9 ? s + str.tostring(a / 1e9, "0.00") + "B" : a >= 1e6 ? s + str.tostring(a / 1e6, "0.00") + "M" : a >= 1e3 ? s + str.tostring(a / 1e3, "0.00") + "K" : s + str.tostring(a, "0.00")
+
+var table perf = table.new(position.bottom_right, 2, 8, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+if showMetrics and barstate.islast
+    closed   = strategy.closedtrades
+    wins     = strategy.wintrades
+    losses   = strategy.losstrades
+    winRate  = closed > 0 ? wins / closed * 100 : 0.0
+    gp       = strategy.grossprofit
+    gl       = strategy.grossloss
+    pf       = gl > 0 ? gp / gl : (gp > 0 ? 999.0 : 0.0)
+    netP     = strategy.netprofit
+    netPct   = strategy.initial_capital > 0 ? netP / strategy.initial_capital * 100 : 0.0
+    ddPct    = strategy.initial_capital > 0 ? strategy.max_drawdown / strategy.initial_capital * 100 : 0.0
+    expc     = closed > 0 ? netP / closed : 0.0
+    avgWin   = wins > 0 ? gp / wins : 0.0
+    avgLoss  = losses > 0 ? gl / losses : 0.0
+    hd2  = color.new(color.black, 10)
+    kb2  = color.new(color.black, 25)
+    wrC  = winRate >= 55 ? bullCol : winRate >= 45 ? #ffb300 : bearCol
+    pfC  = pf >= 1.75 ? bullCol : pf >= 1.0 ? #ffb300 : bearCol
+    npC  = netP >= 0 ? bullCol : bearCol
+    exC  = expc >= 0 ? bullCol : bearCol
+    table.cell(perf, 0, 0, "BACKTEST", text_color = color.white, bgcolor = hd2, text_size = size.small)
+    table.cell(perf, 1, 0, str.tostring(closed) + " trades", text_color = color.white, bgcolor = hd2, text_size = size.small)
+    table.cell(perf, 0, 1, "Win Rate", text_color = color.white, bgcolor = kb2, text_size = size.small)
+    table.cell(perf, 1, 1, str.tostring(winRate, "0.0") + " %", text_color = color.white, bgcolor = color.new(wrC, 25), text_size = size.small)
+    table.cell(perf, 0, 2, "Profit Factor", text_color = color.white, bgcolor = kb2, text_size = size.small)
+    table.cell(perf, 1, 2, str.tostring(pf, "0.00"), text_color = color.white, bgcolor = color.new(pfC, 25), text_size = size.small)
+    table.cell(perf, 0, 3, "Net Profit", text_color = color.white, bgcolor = kb2, text_size = size.small)
+    table.cell(perf, 1, 3, f_money(netP) + " (" + str.tostring(netPct, "0.0") + "%)", text_color = color.white, bgcolor = color.new(npC, 25), text_size = size.small)
+    table.cell(perf, 0, 4, "Max Drawdown", text_color = color.white, bgcolor = kb2, text_size = size.small)
+    table.cell(perf, 1, 4, f_money(strategy.max_drawdown) + " (" + str.tostring(ddPct, "0.0") + "%)", text_color = color.white, bgcolor = color.new(bearCol, 25), text_size = size.small)
+    table.cell(perf, 0, 5, "Expectancy", text_color = color.white, bgcolor = kb2, text_size = size.small)
+    table.cell(perf, 1, 5, f_money(expc) + " /trade", text_color = color.white, bgcolor = color.new(exC, 25), text_size = size.small)
+    table.cell(perf, 0, 6, "Avg Win / Loss", text_color = color.white, bgcolor = kb2, text_size = size.small)
+    table.cell(perf, 1, 6, f_money(avgWin) + " / " + f_money(avgLoss), text_color = color.white, bgcolor = kb2, text_size = size.small)
+    table.cell(perf, 0, 7, "Wins / Losses", text_color = color.white, bgcolor = kb2, text_size = size.small)
+    table.cell(perf, 1, 7, str.tostring(wins) + " / " + str.tostring(losses), text_color = color.white, bgcolor = kb2, text_size = size.small)
