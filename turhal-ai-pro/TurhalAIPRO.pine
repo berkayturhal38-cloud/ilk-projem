@@ -1,0 +1,100 @@
+//@version=6
+// ============================================================================
+//  Turhal AI PRO  —  Smart Money Concepts (SMC) System
+//  V1: Swing High/Low · Market Structure (HH/LH/HL/LL) · BOS · CHoCH · Trend
+//  Author: berkayturhal38 | License: MPL-2.0
+//  Non-repaint: pivots are confirmed (lag = swingLen bars); structure breaks
+//  are committed only on bar close (barstate.isconfirmed).
+// ============================================================================
+indicator("Turhal AI PRO — V1", "Turhal AI PRO", overlay = true, max_lines_count = 500, max_labels_count = 500)
+
+// ============================================================================
+//  INPUTS
+// ============================================================================
+grpS = "Structure"
+swingLen   = input.int(10, "Swing Length", minval = 2, maxval = 100, group = grpS, tooltip = "Higher = major structure, lower = minor structure.")
+showSwings = input.bool(true,  "Show Swing Points (HH/LH/HL/LL)", group = grpS)
+showBOS    = input.bool(true,  "Show BOS",   group = grpS)
+showCHOCH  = input.bool(true,  "Show CHoCH", group = grpS)
+
+grpC = "Colors"
+bullCol  = input.color(#26a69a, "Bullish", group = grpC)
+bearCol  = input.color(#ef5350, "Bearish", group = grpC)
+swingCol = input.color(#787b86, "Swing Points", group = grpC)
+
+grpD = "Dashboard"
+showDash = input.bool(true, "Show Trend Panel", group = grpD)
+
+// ============================================================================
+//  STATE
+// ============================================================================
+var float lastPH   = na          // last confirmed swing-high price (for HH/LH)
+var float lastPL   = na          // last confirmed swing-low price  (for HL/LL)
+var float upLevel  = na          // structure high to break (bullish trigger)
+var int   upX      = na          // bar_index of that swing high
+var bool  upBroken = false       // has upLevel already been broken?
+var float dnLevel  = na          // structure low to break (bearish trigger)
+var int   dnX      = na          // bar_index of that swing low
+var bool  dnBroken = false       // has dnLevel already been broken?
+var int   trend    = 0           //  1 = bullish, -1 = bearish, 0 = neutral
+
+// ============================================================================
+//  MODULE 1 — SWING DETECTION  (confirmed pivots → market structure labels)
+// ============================================================================
+ph = ta.pivothigh(swingLen, swingLen)
+pl = ta.pivotlow(swingLen, swingLen)
+
+// New confirmed swing HIGH
+if not na(ph)
+    phLbl = na(lastPH) ? "HH" : (ph > lastPH ? "HH" : "LH")
+    if showSwings
+        label.new(bar_index - swingLen, ph, phLbl, xloc = xloc.bar_index, style = label.style_label_down, color = color.new(swingCol, 20), textcolor = color.white, size = size.tiny)
+    lastPH   := ph
+    upLevel  := ph
+    upX      := bar_index - swingLen
+    upBroken := false
+
+// New confirmed swing LOW
+if not na(pl)
+    plLbl = na(lastPL) ? "LL" : (pl < lastPL ? "LL" : "HL")
+    if showSwings
+        label.new(bar_index - swingLen, pl, plLbl, xloc = xloc.bar_index, style = label.style_label_up, color = color.new(swingCol, 20), textcolor = color.white, size = size.tiny)
+    lastPL   := pl
+    dnLevel  := pl
+    dnX      := bar_index - swingLen
+    dnBroken := false
+
+// ============================================================================
+//  MODULE 2 — MARKET STRUCTURE  (BOS / CHoCH detection)
+//  BOS  = break in the direction of the current trend (continuation)
+//  CHoCH= first break against the current trend (potential reversal)
+// ============================================================================
+// Bullish break: close above the last swing-high level
+if not na(upLevel) and not upBroken and barstate.isconfirmed and close > upLevel
+    upBroken := true
+    isChoch  = trend == -1
+    trend    := 1
+    if isChoch ? showCHOCH : showBOS
+        line.new(upX, upLevel, bar_index, upLevel, xloc = xloc.bar_index, color = bullCol, width = 2, style = isChoch ? line.style_dashed : line.style_solid)
+        label.new(bar_index, upLevel, isChoch ? "CHoCH" : "BOS", xloc = xloc.bar_index, style = label.style_label_down, color = color.new(bullCol, 15), textcolor = color.white, size = size.small)
+
+// Bearish break: close below the last swing-low level
+if not na(dnLevel) and not dnBroken and barstate.isconfirmed and close < dnLevel
+    dnBroken := true
+    isChoch  = trend == 1
+    trend    := -1
+    if isChoch ? showCHOCH : showBOS
+        line.new(dnX, dnLevel, bar_index, dnLevel, xloc = xloc.bar_index, color = bearCol, width = 2, style = isChoch ? line.style_dashed : line.style_solid)
+        label.new(bar_index, dnLevel, isChoch ? "CHoCH" : "BOS", xloc = xloc.bar_index, style = label.style_label_up, color = color.new(bearCol, 15), textcolor = color.white, size = size.small)
+
+// ============================================================================
+//  MODULE 3 — TREND DASHBOARD
+// ============================================================================
+var table dash = table.new(position.top_right, 2, 2, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+if showDash and barstate.islast
+    trTxt = trend == 1 ? "BULLISH" : trend == -1 ? "BEARISH" : "NEUTRAL"
+    trCol = trend == 1 ? bullCol : trend == -1 ? bearCol : color.gray
+    table.cell(dash, 0, 0, "Turhal AI PRO", text_color = color.white, bgcolor = color.new(color.black, 10), text_size = size.small)
+    table.cell(dash, 1, 0, "V1", text_color = color.white, bgcolor = color.new(color.black, 10), text_size = size.small)
+    table.cell(dash, 0, 1, "Trend", text_color = color.white, bgcolor = color.new(color.black, 20), text_size = size.small)
+    table.cell(dash, 1, 1, trTxt, text_color = color.white, bgcolor = color.new(trCol, 25), text_size = size.small)
