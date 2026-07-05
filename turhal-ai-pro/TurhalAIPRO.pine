@@ -1,10 +1,11 @@
 //@version=6
 // ============================================================================
 //  Turhal AI PRO  —  Smart Money Concepts (SMC) System
-//  V1: Swing High/Low · Market Structure (HH/LH/HL/LL) · BOS · CHoCH · Trend
+//  V1 (PRO): Swing High/Low · Market Structure (HH/LH/HL/LL) · BOS · CHoCH ·
+//            Trend · Multi-Timeframe (1H/4H) · ATR + Volume strength filter
 //  Author: berkayturhal38 | License: MPL-2.0
 //  Non-repaint: pivots are confirmed (lag = swingLen bars); structure breaks
-//  are committed only on bar close (barstate.isconfirmed).
+//  commit only on bar close (barstate.isconfirmed); MTF via lookahead_off.
 // ============================================================================
 indicator("Turhal AI PRO — V1", "Turhal AI PRO", overlay = true, max_lines_count = 500, max_labels_count = 500)
 
@@ -13,64 +14,136 @@ indicator("Turhal AI PRO — V1", "Turhal AI PRO", overlay = true, max_lines_cou
 // ============================================================================
 grpS = "Structure"
 swingLen   = input.int(10, "Swing Length", minval = 2, maxval = 100, group = grpS, tooltip = "Higher = major structure, lower = minor structure.")
-showSwings = input.bool(true,  "Show Swing Points (HH/LH/HL/LL)", group = grpS)
-showBOS    = input.bool(true,  "Show BOS",   group = grpS)
-showCHOCH  = input.bool(true,  "Show CHoCH", group = grpS)
+showSwings = input.bool(true, "Show Swing Points (HH/LH/HL/LL)", group = grpS)
+showBOS    = input.bool(true, "Show BOS",   group = grpS)
+showCHOCH  = input.bool(true, "Show CHoCH", group = grpS)
+
+grpF = "Strength Filters (strong breaks only)"
+useATR   = input.bool(true, "ATR Displacement Filter", group = grpF, tooltip = "Break candle body must be a strong momentum candle relative to ATR.")
+atrLen   = input.int(14, "ATR Length", minval = 1, group = grpF)
+atrMult  = input.float(0.7, "Min Body / ATR", minval = 0.0, step = 0.1, group = grpF)
+useVol   = input.bool(true, "Volume Filter", group = grpF, tooltip = "Break candle volume must exceed its moving average (auto-skipped if the symbol has no volume).")
+volLen   = input.int(20, "Volume MA Length", minval = 1, group = grpF)
+volMult  = input.float(1.2, "Min Volume / MA", minval = 0.0, step = 0.1, group = grpF)
+
+grpM = "Multi-Timeframe"
+mtfFilter = input.bool(true, "Require MTF Alignment", group = grpM, tooltip = "Only allow structure breaks that do not oppose the 1H and 4H trend.")
+htfTf1    = input.timeframe("60",  "Higher Timeframe 1", group = grpM)
+htfTf2    = input.timeframe("240", "Higher Timeframe 2", group = grpM)
+
+grpL = "Liquidity (Equal Highs / Lows)"
+showEQ    = input.bool(true, "Show Equal Highs/Lows", group = grpL, tooltip = "Marks resting liquidity: two swing highs (or lows) at ~the same price.")
+eqAtrMult = input.float(0.1, "Equal Tolerance / ATR", minval = 0.01, step = 0.05, group = grpL)
 
 grpC = "Colors"
 bullCol  = input.color(#26a69a, "Bullish", group = grpC)
 bearCol  = input.color(#ef5350, "Bearish", group = grpC)
 swingCol = input.color(#787b86, "Swing Points", group = grpC)
+eqCol    = input.color(#ffb300, "Liquidity (EQH/EQL)", group = grpC)
 
 grpD = "Dashboard"
-showDash = input.bool(true, "Show Trend Panel", group = grpD)
+showDash = input.bool(true, "Show Dashboard", group = grpD)
+
+// ============================================================================
+//  REUSABLE TREND ENGINE  (used for the higher timeframes via request.security)
+//  Returns:  1 = bullish, -1 = bearish, 0 = neutral. Pivots keep it non-repaint.
+// ============================================================================
+f_trend() =>
+    h = ta.pivothigh(swingLen, swingLen)
+    l = ta.pivotlow(swingLen, swingLen)
+    var float uL = na
+    var float dL = na
+    var bool  uB = false
+    var bool  dB = false
+    var int   t  = 0
+    if not na(h)
+        uL := h
+        uB := false
+    if not na(l)
+        dL := l
+        dB := false
+    if not na(uL) and not uB and close > uL
+        uB := true
+        t  := 1
+    if not na(dL) and not dB and close < dL
+        dB := true
+        t  := -1
+    t
+
+// Non-repaint HTF trends (values settle at each higher-timeframe close)
+htf1 = request.security(syminfo.tickerid, htfTf1, f_trend(), lookahead = barmerge.lookahead_off)
+htf2 = request.security(syminfo.tickerid, htfTf2, f_trend(), lookahead = barmerge.lookahead_off)
+
+// ============================================================================
+//  STRENGTH FILTERS  (ATR displacement + volume)
+// ============================================================================
+atrVal   = ta.atr(atrLen)
+bodySize = math.abs(close - open)
+volMA    = ta.sma(volume, volLen)
+atrOK    = not useATR or (not na(atrVal) and bodySize >= atrVal * atrMult)
+volOK    = not useVol or na(volume) or (not na(volMA) and volume >= volMA * volMult)
+strong   = atrOK and volOK
+
+// MTF alignment gates (a bull break must not fight HTF downtrend, and vice-versa)
+bullMTFok = not mtfFilter or (htf1 >= 0 and htf2 >= 0)
+bearMTFok = not mtfFilter or (htf1 <= 0 and htf2 <= 0)
 
 // ============================================================================
 //  STATE
 // ============================================================================
-var float lastPH   = na          // last confirmed swing-high price (for HH/LH)
-var float lastPL   = na          // last confirmed swing-low price  (for HL/LL)
-var float upLevel  = na          // structure high to break (bullish trigger)
-var int   upX      = na          // bar_index of that swing high
-var bool  upBroken = false       // has upLevel already been broken?
-var float dnLevel  = na          // structure low to break (bearish trigger)
-var int   dnX      = na          // bar_index of that swing low
-var bool  dnBroken = false       // has dnLevel already been broken?
-var int   trend    = 0           //  1 = bullish, -1 = bearish, 0 = neutral
+var float lastPH   = na
+var int   lastPHx  = na
+var float lastPL   = na
+var int   lastPLx  = na
+var float upLevel  = na
+var int   upX      = na
+var bool  upBroken = false
+var float dnLevel  = na
+var int   dnX      = na
+var bool  dnBroken = false
+var int   trend    = 0
 
 // ============================================================================
-//  MODULE 1 — SWING DETECTION  (confirmed pivots → market structure labels)
+//  MODULE 1 — SWING DETECTION  (confirmed pivots → market-structure labels)
 // ============================================================================
 ph = ta.pivothigh(swingLen, swingLen)
 pl = ta.pivotlow(swingLen, swingLen)
 
-// New confirmed swing HIGH
 if not na(ph)
+    phx   = bar_index - swingLen
     phLbl = na(lastPH) ? "HH" : (ph > lastPH ? "HH" : "LH")
     if showSwings
-        label.new(bar_index - swingLen, ph, phLbl, xloc = xloc.bar_index, style = label.style_label_down, color = color.new(swingCol, 20), textcolor = color.white, size = size.tiny)
+        label.new(phx, ph, phLbl, xloc = xloc.bar_index, style = label.style_label_down, color = color.new(swingCol, 20), textcolor = color.white, size = size.tiny)
+    // Equal High = liquidity pool (resting stops above)
+    if showEQ and not na(lastPH) and not na(atrVal) and math.abs(ph - lastPH) <= atrVal * eqAtrMult
+        line.new(lastPHx, lastPH, phx, ph, xloc = xloc.bar_index, color = eqCol, width = 1, style = line.style_dotted)
+        label.new(phx, math.max(ph, lastPH), "EQH", xloc = xloc.bar_index, style = label.style_label_down, color = color.new(eqCol, 20), textcolor = color.white, size = size.tiny)
     lastPH   := ph
+    lastPHx  := phx
     upLevel  := ph
-    upX      := bar_index - swingLen
+    upX      := phx
     upBroken := false
 
-// New confirmed swing LOW
 if not na(pl)
+    plx   = bar_index - swingLen
     plLbl = na(lastPL) ? "LL" : (pl < lastPL ? "LL" : "HL")
     if showSwings
-        label.new(bar_index - swingLen, pl, plLbl, xloc = xloc.bar_index, style = label.style_label_up, color = color.new(swingCol, 20), textcolor = color.white, size = size.tiny)
+        label.new(plx, pl, plLbl, xloc = xloc.bar_index, style = label.style_label_up, color = color.new(swingCol, 20), textcolor = color.white, size = size.tiny)
+    // Equal Low = liquidity pool (resting stops below)
+    if showEQ and not na(lastPL) and not na(atrVal) and math.abs(pl - lastPL) <= atrVal * eqAtrMult
+        line.new(lastPLx, lastPL, plx, pl, xloc = xloc.bar_index, color = eqCol, width = 1, style = line.style_dotted)
+        label.new(plx, math.min(pl, lastPL), "EQL", xloc = xloc.bar_index, style = label.style_label_up, color = color.new(eqCol, 20), textcolor = color.white, size = size.tiny)
     lastPL   := pl
+    lastPLx  := plx
     dnLevel  := pl
-    dnX      := bar_index - swingLen
+    dnX      := plx
     dnBroken := false
 
 // ============================================================================
-//  MODULE 2 — MARKET STRUCTURE  (BOS / CHoCH detection)
-//  BOS  = break in the direction of the current trend (continuation)
-//  CHoCH= first break against the current trend (potential reversal)
+//  MODULE 2 — MARKET STRUCTURE  (strong, MTF-aligned BOS / CHoCH)
 // ============================================================================
-// Bullish break: close above the last swing-high level
-if not na(upLevel) and not upBroken and barstate.isconfirmed and close > upLevel
+// Bullish break
+if not na(upLevel) and not upBroken and barstate.isconfirmed and close > upLevel and strong and bullMTFok
     upBroken := true
     isChoch  = trend == -1
     trend    := 1
@@ -78,8 +151,8 @@ if not na(upLevel) and not upBroken and barstate.isconfirmed and close > upLevel
         line.new(upX, upLevel, bar_index, upLevel, xloc = xloc.bar_index, color = bullCol, width = 2, style = isChoch ? line.style_dashed : line.style_solid)
         label.new(bar_index, upLevel, isChoch ? "CHoCH" : "BOS", xloc = xloc.bar_index, style = label.style_label_down, color = color.new(bullCol, 15), textcolor = color.white, size = size.small)
 
-// Bearish break: close below the last swing-low level
-if not na(dnLevel) and not dnBroken and barstate.isconfirmed and close < dnLevel
+// Bearish break
+if not na(dnLevel) and not dnBroken and barstate.isconfirmed and close < dnLevel and strong and bearMTFok
     dnBroken := true
     isChoch  = trend == 1
     trend    := -1
@@ -88,13 +161,20 @@ if not na(dnLevel) and not dnBroken and barstate.isconfirmed and close < dnLevel
         label.new(bar_index, dnLevel, isChoch ? "CHoCH" : "BOS", xloc = xloc.bar_index, style = label.style_label_up, color = color.new(bearCol, 15), textcolor = color.white, size = size.small)
 
 // ============================================================================
-//  MODULE 3 — TREND DASHBOARD
+//  MODULE 3 — DASHBOARD  (local + MTF trend)
 // ============================================================================
-var table dash = table.new(position.top_right, 2, 2, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+f_trTxt(t) => t == 1 ? "BULLISH" : t == -1 ? "BEARISH" : "NEUTRAL"
+f_trCol(t) => t == 1 ? bullCol : t == -1 ? bearCol : color.gray
+
+var table dash = table.new(position.top_right, 2, 4, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
 if showDash and barstate.islast
-    trTxt = trend == 1 ? "BULLISH" : trend == -1 ? "BEARISH" : "NEUTRAL"
-    trCol = trend == 1 ? bullCol : trend == -1 ? bearCol : color.gray
-    table.cell(dash, 0, 0, "Turhal AI PRO", text_color = color.white, bgcolor = color.new(color.black, 10), text_size = size.small)
-    table.cell(dash, 1, 0, "V1", text_color = color.white, bgcolor = color.new(color.black, 10), text_size = size.small)
-    table.cell(dash, 0, 1, "Trend", text_color = color.white, bgcolor = color.new(color.black, 20), text_size = size.small)
-    table.cell(dash, 1, 1, trTxt, text_color = color.white, bgcolor = color.new(trCol, 25), text_size = size.small)
+    hdBg = color.new(color.black, 10)
+    kBg  = color.new(color.black, 25)
+    table.cell(dash, 0, 0, "Turhal AI PRO", text_color = color.white, bgcolor = hdBg, text_size = size.small)
+    table.cell(dash, 1, 0, "V1", text_color = color.white, bgcolor = hdBg, text_size = size.small)
+    table.cell(dash, 0, 1, "Trend", text_color = color.white, bgcolor = kBg, text_size = size.small)
+    table.cell(dash, 1, 1, f_trTxt(trend), text_color = color.white, bgcolor = color.new(f_trCol(trend), 25), text_size = size.small)
+    table.cell(dash, 0, 2, "1H", text_color = color.white, bgcolor = kBg, text_size = size.small)
+    table.cell(dash, 1, 2, f_trTxt(htf1), text_color = color.white, bgcolor = color.new(f_trCol(htf1), 25), text_size = size.small)
+    table.cell(dash, 0, 3, "4H", text_color = color.white, bgcolor = kBg, text_size = size.small)
+    table.cell(dash, 1, 3, f_trTxt(htf2), text_color = color.white, bgcolor = color.new(f_trCol(htf2), 25), text_size = size.small)
