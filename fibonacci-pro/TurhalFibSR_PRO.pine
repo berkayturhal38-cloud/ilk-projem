@@ -27,6 +27,7 @@ hlBg = input.bool(true, "Highlight Golden Zone Background", group=gv)
 gl = "Levels"
 showExt = input.bool(true, "Show Extensions (1.272 ... 4.764)", group=gl)
 showUpper = input.bool(true, "Show Upper Targets (-0.236 ... -1.0)", group=gl)
+showUpperLbl = input.bool(false, "Upper Target Labels", group=gl)
 
 gc = "Colors"
 c0 = input.color(#787b86, "0.0", group=gc)
@@ -301,15 +302,15 @@ label.set_text(be8, showLbl and not na(le4618) ? "4.618  " + str.tostring(le4618
 label.set_xy(be9, lbX, le4764)
 label.set_text(be9, showLbl and not na(le4764) ? "4.764  " + str.tostring(le4764, format.mintick) : "")
 label.set_xy(bu1, lbX, um236)
-label.set_text(bu1, showLbl and not na(um236) ? "-0.236  " + str.tostring(um236, format.mintick) : "")
+label.set_text(bu1, showLbl and showUpperLbl and not na(um236) ? "-0.236  " + str.tostring(um236, format.mintick) : "")
 label.set_xy(bu2, lbX, um382)
-label.set_text(bu2, showLbl and not na(um382) ? "-0.382  " + str.tostring(um382, format.mintick) : "")
+label.set_text(bu2, showLbl and showUpperLbl and not na(um382) ? "-0.382  " + str.tostring(um382, format.mintick) : "")
 label.set_xy(bu3, lbX, um5)
-label.set_text(bu3, showLbl and not na(um5) ? "-0.5  " + str.tostring(um5, format.mintick) : "")
+label.set_text(bu3, showLbl and showUpperLbl and not na(um5) ? "-0.5  " + str.tostring(um5, format.mintick) : "")
 label.set_xy(bu4, lbX, um618)
-label.set_text(bu4, showLbl and not na(um618) ? "-0.618  " + str.tostring(um618, format.mintick) : "")
+label.set_text(bu4, showLbl and showUpperLbl and not na(um618) ? "-0.618  " + str.tostring(um618, format.mintick) : "")
 label.set_xy(bu5, lbX, um1)
-label.set_text(bu5, showLbl and not na(um1) ? "-1.0  " + str.tostring(um1, format.mintick) : "")
+label.set_text(bu5, showLbl and showUpperLbl and not na(um1) ? "-1.0  " + str.tostring(um1, format.mintick) : "")
 
 var label mkH = label.new(na, na, "", style=label.style_label_down, color=color.new(#f23645, 20), textcolor=color.white, size=lblSz)
 var label mkL = label.new(na, na, "", style=label.style_label_up, color=color.new(#4caf50, 20), textcolor=color.white, size=lblSz)
