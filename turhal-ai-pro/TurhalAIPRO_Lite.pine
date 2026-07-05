@@ -130,7 +130,7 @@ cMTF  = (al1 ? 20.0 : 0.0) + (al2 ? 25.0 : 0.0)
 cDisp = (not na(atrVal) and atrVal > 0) ? math.min(25.0, bodySize / atrVal * 17.0) : 0.0
 cVol  = (not na(volume) and not na(volMA) and volMA > 0) ? math.min(15.0, volume / volMA * 8.0) : 0.0
 cZone = zoneOK ? 15.0 : 0.0
-conf  = trend == 0 ? 0 : math.min(100, int(math.round(cMTF + cDisp + cVol + cZone)))
+conf  = trend == 0 ? 0 : int(math.min(100, math.round(cMTF + cDisp + cVol + cZone)))
 
 // ---- LIVE TRADE PLAN for the current trend (Entry / SL / TP1-3) ------------
 entryP = trend == 0 ? na : close
@@ -182,7 +182,7 @@ table.cell(dash, 1, 6, setupTxt, text_color = color.white, bgcolor = color.new(s
 table.cell(dash, 0, 7, "State", text_color = color.white, bgcolor = kb, text_size = size.small)
 table.cell(dash, 1, 7, stateTxt, text_color = color.white, bgcolor = color.new(stateCol, 25), text_size = size.small)
 table.cell(dash, 0, 8, "Entry", text_color = color.white, bgcolor = kb, text_size = size.tiny)
-table.cell(dash, 1, 8, f_px(entryP), text_color = color.white, bgcolor = kb, text_size = size.tiny)
+table.cell(dash, 1, 8, f_px(validPlan ? entryP : na), text_color = color.white, bgcolor = kb, text_size = size.tiny)
 table.cell(dash, 0, 9, "SL", text_color = color.white, bgcolor = kb, text_size = size.tiny)
 table.cell(dash, 1, 9, f_px(validPlan ? slLive : na), text_color = color.white, bgcolor = color.new(bearCol, 40), text_size = size.tiny)
 table.cell(dash, 0, 10, "TP1 / TP2", text_color = color.white, bgcolor = kb, text_size = size.tiny)
