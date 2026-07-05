@@ -18,8 +18,24 @@ fillT = input.int(85, "Zone Transparency", minval=50, maxval=98, group=gs)
 showConn = input.bool(true, "Trend Line", group=gs)
 showLbl = input.bool(true, "Show Labels", group=gs)
 lblSizeStr = input.string("Tiny", "Label Size", options=["Tiny", "Small", "Normal", "Large"], group=gs)
-showExt = input.bool(true, "Show Extensions (1.272 ... 2.618)", group=gs)
-showExtDeep = input.bool(true, "Show Deep Extensions (3.0 ... 4.764)", group=gs)
+ge = "Extension Levels (check to show)"
+x1272 = input.bool(true, "1.272", group=ge)
+x1414 = input.bool(false, "1.414", group=ge)
+x1618 = input.bool(true, "1.618", group=ge)
+x200 = input.bool(false, "2.0", group=ge)
+x2272 = input.bool(false, "2.272", group=ge)
+x2414 = input.bool(false, "2.414", group=ge)
+x2618 = input.bool(true, "2.618", group=ge)
+x300 = input.bool(false, "3.0", group=ge)
+x3272 = input.bool(false, "3.272", group=ge)
+x3414 = input.bool(false, "3.414", group=ge)
+x3618 = input.bool(true, "3.618", group=ge)
+x400 = input.bool(false, "4.0", group=ge)
+x4236 = input.bool(true, "4.236", group=ge)
+x4272 = input.bool(false, "4.272", group=ge)
+x4414 = input.bool(false, "4.414", group=ge)
+x4618 = input.bool(false, "4.618", group=ge)
+x4764 = input.bool(false, "4.764", group=ge)
 
 gc = "Colors"
 c0 = input.color(#787b86, "0.0", group=gc)
@@ -48,23 +64,23 @@ lp5 = aa + rng * 0.5
 lp618 = aa + rng * 0.618
 lp786 = aa + rng * 0.786
 lp1 = aa + rng * 1.0
-e1272 = showExt ? aa + rng * 1.272 : na
-e1414 = showExt ? aa + rng * 1.414 : na
-e1618 = showExt ? aa + rng * 1.618 : na
-e200 = showExt ? aa + rng * 2.0 : na
-e2272 = showExt ? aa + rng * 2.272 : na
-e2414 = showExt ? aa + rng * 2.414 : na
-e2618 = showExt ? aa + rng * 2.618 : na
-e300 = showExt and showExtDeep ? aa + rng * 3.0 : na
-e3272 = showExt and showExtDeep ? aa + rng * 3.272 : na
-e3414 = showExt and showExtDeep ? aa + rng * 3.414 : na
-e3618 = showExt and showExtDeep ? aa + rng * 3.618 : na
-e400 = showExt and showExtDeep ? aa + rng * 4.0 : na
-e4236 = showExt and showExtDeep ? aa + rng * 4.236 : na
-e4272 = showExt and showExtDeep ? aa + rng * 4.272 : na
-e4414 = showExt and showExtDeep ? aa + rng * 4.414 : na
-e4618 = showExt and showExtDeep ? aa + rng * 4.618 : na
-e4764 = showExt and showExtDeep ? aa + rng * 4.764 : na
+e1272 = x1272 ? aa + rng * 1.272 : na
+e1414 = x1414 ? aa + rng * 1.414 : na
+e1618 = x1618 ? aa + rng * 1.618 : na
+e200 = x200 ? aa + rng * 2.0 : na
+e2272 = x2272 ? aa + rng * 2.272 : na
+e2414 = x2414 ? aa + rng * 2.414 : na
+e2618 = x2618 ? aa + rng * 2.618 : na
+e300 = x300 ? aa + rng * 3.0 : na
+e3272 = x3272 ? aa + rng * 3.272 : na
+e3414 = x3414 ? aa + rng * 3.414 : na
+e3618 = x3618 ? aa + rng * 3.618 : na
+e400 = x400 ? aa + rng * 4.0 : na
+e4236 = x4236 ? aa + rng * 4.236 : na
+e4272 = x4272 ? aa + rng * 4.272 : na
+e4414 = x4414 ? aa + rng * 4.414 : na
+e4618 = x4618 ? aa + rng * 4.618 : na
+e4764 = x4764 ? aa + rng * 4.764 : na
 
 var box z1 = box.new(na, na, na, na, xloc=xloc.bar_time, border_color=color.new(color.gray, 100))
 var box z2 = box.new(na, na, na, na, xloc=xloc.bar_time, border_color=color.new(color.gray, 100))
