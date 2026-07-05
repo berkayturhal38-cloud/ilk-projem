@@ -91,19 +91,20 @@ gD = "Dashboard"
 showDash = input.bool(true, "Show Dashboard", group = gD)
 
 // ============================================================================
-//  TYPES & POOLS
+//  POOLS  (parallel arrays — no UDT, mobile-paste safe)
 // ============================================================================
-type Zone
-    box   bx
-    float top
-    float bot
-    int   dir
-    bool  mitigated
-
-var line[]      poolL = array.new<line>()
-var label[]     poolB = array.new<label>()
-var array<Zone> obs   = array.new<Zone>()
-var array<Zone> fvgs  = array.new<Zone>()
+var line[]  poolL = array.new<line>()
+var label[] poolB = array.new<label>()
+var box[]   obZbx  = array.new<box>()
+var float[] obZtop = array.new<float>()
+var float[] obZbot = array.new<float>()
+var int[]   obZdir = array.new<int>()
+var bool[]  obZmit = array.new<bool>()
+var box[]   fvZbx  = array.new<box>()
+var float[] fvZtop = array.new<float>()
+var float[] fvZbot = array.new<float>()
+var int[]   fvZdir = array.new<int>()
+var bool[]  fvZmit = array.new<bool>()
 
 regL(line ln) =>
     array.push(poolL, ln)
@@ -115,27 +116,36 @@ regB(label lb) =>
         label.delete(array.shift(poolB))
 
 // Generic zone factory & mitigation (DRY for OB + FVG)
-f_addZone(array<Zone> arr, int dir, float top, float bot, int x, int maxN, color col, int tr) =>
+f_addZone(box[] aBx, float[] aTop, float[] aBot, int[] aDir, bool[] aMit, int dir, float top, float bot, int x, int maxN, color col, int tr) =>
     bx = box.new(x, top, bar_index, bot, xloc = xloc.bar_index, extend = extend.right, bgcolor = color.new(col, tr), border_color = color.new(col, 45), border_width = 1)
-    array.push(arr, Zone.new(bx, top, bot, dir, false))
-    if array.size(arr) > maxN
-        box.delete(array.shift(arr).bx)
+    array.push(aBx, bx)
+    array.push(aTop, top)
+    array.push(aBot, bot)
+    array.push(aDir, dir)
+    array.push(aMit, false)
+    if array.size(aBx) > maxN
+        box.delete(array.shift(aBx))
+        array.shift(aTop)
+        array.shift(aBot)
+        array.shift(aDir)
+        array.shift(aMit)
     bx
 
-f_mitigate(array<Zone> arr, bool keep, color cUp, color cDn, int tr) =>
-    if array.size(arr) > 0
-        for i = 0 to array.size(arr) - 1
-            z = array.get(arr, i)
-            if not z.mitigated
-                hit = z.dir == 1 ? low <= z.top : high >= z.bot
+f_mitigate(box[] aBx, float[] aTop, float[] aBot, int[] aDir, bool[] aMit, bool keep, color cUp, color cDn, int tr) =>
+    if array.size(aBx) > 0
+        for i = 0 to array.size(aBx) - 1
+            if not array.get(aMit, i)
+                dir = array.get(aDir, i)
+                hit = dir == 1 ? low <= array.get(aTop, i) : high >= array.get(aBot, i)
                 if hit
-                    z.mitigated := true
+                    array.set(aMit, i, true)
+                    bx = array.get(aBx, i)
                     if keep
-                        box.set_extend(z.bx, extend.none)
-                        box.set_right(z.bx, bar_index)
-                        box.set_bgcolor(z.bx, color.new(z.dir == 1 ? cUp : cDn, math.min(95, tr + 10)))
+                        box.set_extend(bx, extend.none)
+                        box.set_right(bx, bar_index)
+                        box.set_bgcolor(bx, color.new(dir == 1 ? cUp : cDn, math.min(95, tr + 10)))
                     else
-                        box.delete(z.bx)
+                        box.delete(bx)
 
 // ============================================================================
 //  REUSABLE TREND ENGINE  (higher timeframes)
@@ -280,10 +290,10 @@ if not na(pl)
 // ============================================================================
 if showFVG and barstate.isconfirmed and not na(atrVal)
     if low > high[2] and (low - high[2]) >= atrVal * fvgMinAtr
-        f_addZone(fvgs, 1, low, high[2], bar_index - 1, maxFVG, fvgBullC, fvgTransp)
+        f_addZone(fvZbx, fvZtop, fvZbot, fvZdir, fvZmit, 1, low, high[2], bar_index - 1, maxFVG, fvgBullC, fvgTransp)
         bullFvgBar := bar_index
     if high < low[2] and (low[2] - high) >= atrVal * fvgMinAtr
-        f_addZone(fvgs, -1, low[2], high, bar_index - 1, maxFVG, fvgBearC, fvgTransp)
+        f_addZone(fvZbx, fvZtop, fvZbot, fvZdir, fvZmit, -1, low[2], high, bar_index - 1, maxFVG, fvgBearC, fvgTransp)
         bearFvgBar := bar_index
 
 // ============================================================================
@@ -301,8 +311,8 @@ confBear = not na(bearFvgBar) and (bar_index - bearFvgBar) <= confLookback
 // ============================================================================
 //  ZONE MITIGATION  (bounded loops over active zones only)
 // ============================================================================
-f_mitigate(obs,  obKeepMit,  obBullC,  obBearC,  obTransp)
-f_mitigate(fvgs, fvgKeepMit, fvgBullC, fvgBearC, fvgTransp)
+f_mitigate(obZbx, obZtop, obZbot, obZdir, obZmit, obKeepMit,  obBullC,  obBearC,  obTransp)
+f_mitigate(fvZbx, fvZtop, fvZbot, fvZdir, fvZmit, fvgKeepMit, fvgBullC, fvgBearC, fvgTransp)
 
 // ============================================================================
 //  PREMIUM / DISCOUNT  (current dealing range equilibrium)
@@ -345,7 +355,7 @@ if bullBreak
         obTop = obBody ? bearBT : bearHi
         obBot = obBody ? bearBB : bearLo
         if na(atrVal) or (obTop - obBot) >= atrVal * obMinAtr
-            bx = f_addZone(obs, 1, obTop, obBot, bearIdx, maxOB, obBullC, obTransp)
+            bx = f_addZone(obZbx, obZtop, obZbot, obZdir, obZmit, 1, obTop, obBot, bearIdx, maxOB, obBullC, obTransp)
             regB(label.new(bar_index, (obTop + obBot) / 2, "OB", xloc = xloc.bar_index, style = label.style_label_left, color = color.new(obBullC, 30), textcolor = color.white, size = size.tiny))
 
 if bearBreak
@@ -360,7 +370,7 @@ if bearBreak
         obTop = obBody ? bullBT : bullHi
         obBot = obBody ? bullBB : bullLo
         if na(atrVal) or (obTop - obBot) >= atrVal * obMinAtr
-            bx = f_addZone(obs, -1, obTop, obBot, bullIdx, maxOB, obBearC, obTransp)
+            bx = f_addZone(obZbx, obZtop, obZbot, obZdir, obZmit, -1, obTop, obBot, bullIdx, maxOB, obBearC, obTransp)
             regB(label.new(bar_index, (obTop + obBot) / 2, "OB", xloc = xloc.bar_index, style = label.style_label_left, color = color.new(obBearC, 30), textcolor = color.white, size = size.tiny))
 
 // ============================================================================
