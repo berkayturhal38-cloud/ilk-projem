@@ -4,6 +4,9 @@
 //  SMC essentials: swings, BOS/CHoCH, trend, MTF bias, premium/discount,
 //  entry arrows with 0-100 confidence, dashboard, alerts. Non-repaint:
 //  confirmed pivots + barstate.isconfirmed + MTF lookahead_off.
+//  STABLE BUILD: one single confidence feeds BOTH Signal and Setup; Entry,
+//  SL, TP1/TP2/TP3 are recomputed live every bar (no stale/locked values);
+//  every price uses format.mintick.
 //  Author: berkayturhal38 | License: MPL-2.0
 // ============================================================================
 indicator("Turhal AI PRO — Lite", "Turhal AI PRO Lite", overlay = true, max_lines_count = 500, max_labels_count = 500)
@@ -36,7 +39,9 @@ showEntry      = input.bool(true, "Show Entry Arrows", group = gE)
 entryThreshold = input.int(70, "Min Confidence (%)", minval = 0, maxval = 100, group = gE)
 needDiscount   = input.bool(true, "Longs in Discount / Shorts in Premium", group = gE)
 slAtrMult      = input.float(1.0, "SL ATR Buffer", minval = 0.0, step = 0.1, group = gE)
-rrTgt          = input.float(2.0, "Target R (for label)", minval = 0.1, step = 0.1, group = gE)
+rr1 = input.float(1.0, "TP1 (R)", minval = 0.1, step = 0.1, group = gE)
+rr2 = input.float(2.0, "TP2 (R)", minval = 0.1, step = 0.1, group = gE)
+rr3 = input.float(3.0, "TP3 (R)", minval = 0.1, step = 0.1, group = gE)
 
 gC = "Colors"
 bullCol  = input.color(#26a69a, "Bullish", group = gC)
@@ -50,6 +55,7 @@ f_trTxt(int t) => t == 1 ? "BULLISH" : t == -1 ? "BEARISH" : "NEUTRAL"
 f_trCol(int t) => t == 1 ? bullCol : t == -1 ? bearCol : color.gray
 f_biasTxt(bool b) => b ? "BULLISH" : "BEARISH"
 f_biasCol(bool b) => b ? bullCol : bearCol
+f_px(float v) => na(v) ? "-" : str.tostring(v, format.mintick)
 
 // ---- VOLATILITY & FILTERS ---------------------------------------------------
 atrVal   = ta.atr(atrLen)
@@ -114,35 +120,32 @@ pLo = plot(showPD ? lastPL : na, "Range Low", color = color.new(discCol, 55), st
 fill(pHi, pEq, color = color.new(premCol, 90), title = "Premium")
 fill(pEq, pLo, color = color.new(discCol, 90), title = "Discount")
 
-// ---- CONFIDENCE 0-100 (flat) -----------------------------------------------
-mBull = (htf1Bull ? 15.0 : 0.0) + (htf2Bull ? 20.0 : 0.0)
-mBear = ((not htf1Bull) ? 15.0 : 0.0) + ((not htf2Bull) ? 20.0 : 0.0)
-dStr  = (not na(atrVal) and atrVal > 0) ? math.min(30.0, bodySize / atrVal * 20.0) : 0.0
-vStr  = (not na(volume) and not na(volMA) and volMA > 0) ? math.min(20.0, volume / volMA * 10.0) : 0.0
-confBull = math.min(100, int(math.round(mBull + dStr + vStr + (inDiscount ? 15.0 : 0.0))))
-confBear = math.min(100, int(math.round(mBear + dStr + vStr + (inPremium  ? 15.0 : 0.0))))
+// ---- SINGLE CONFIDENCE (0-100) — feeds BOTH Signal and Setup ---------------
+// Directional alignment is evaluated for the *current trend* only, so the
+// number shown as Signal is always the same number used by the Setup/entry.
+al1   = trend == 1 ? htf1Bull : trend == -1 ? not htf1Bull : false
+al2   = trend == 1 ? htf2Bull : trend == -1 ? not htf2Bull : false
+zoneOK = trend == 1 ? inDiscount : trend == -1 ? inPremium : false
+cMTF  = (al1 ? 20.0 : 0.0) + (al2 ? 25.0 : 0.0)
+cDisp = (not na(atrVal) and atrVal > 0) ? math.min(25.0, bodySize / atrVal * 17.0) : 0.0
+cVol  = (not na(volume) and not na(volMA) and volMA > 0) ? math.min(15.0, volume / volMA * 8.0) : 0.0
+cZone = zoneOK ? 15.0 : 0.0
+conf  = trend == 0 ? 0 : math.min(100, int(math.round(cMTF + cDisp + cVol + cZone)))
 
-// ---- ENTRY ENGINE -----------------------------------------------------------
-slL = (na(lastPL) ? low : math.min(lastPL, low)) - (na(atrVal) ? 0.0 : atrVal * slAtrMult)
-slS = (na(lastPH) ? high : math.max(lastPH, high)) + (na(atrVal) ? 0.0 : atrVal * slAtrMult)
-riskL = close - slL
-riskS = slS - close
-longSig  = showEntry and bullBreak and (not needDiscount or inDiscount) and confBull >= entryThreshold and riskL > 0
-shortSig = showEntry and bearBreak and (not needDiscount or inPremium)  and confBear >= entryThreshold and riskS > 0
-tpL = close + riskL * rrTgt
-tpS = close - riskS * rrTgt
+// ---- LIVE TRADE PLAN for the current trend (Entry / SL / TP1-3) ------------
+entryP = trend == 0 ? na : close
+slLive = trend == 1 ? ((na(lastPL) ? low : math.min(lastPL, low)) - (na(atrVal) ? 0.0 : atrVal * slAtrMult)) : trend == -1 ? ((na(lastPH) ? high : math.max(lastPH, high)) + (na(atrVal) ? 0.0 : atrVal * slAtrMult)) : na
+riskLive = trend == 1 ? (entryP - slLive) : trend == -1 ? (slLive - entryP) : na
+validPlan = not na(riskLive) and riskLive > 0
+tp1Live = not validPlan ? na : trend == 1 ? entryP + riskLive * rr1 : entryP - riskLive * rr1
+tp2Live = not validPlan ? na : trend == 1 ? entryP + riskLive * rr2 : entryP - riskLive * rr2
+tp3Live = not validPlan ? na : trend == 1 ? entryP + riskLive * rr3 : entryP - riskLive * rr3
 
+// ---- ENTRY ARROWS (fire only on a fresh confirmed break) --------------------
+longSig  = showEntry and bullBreak  and (not needDiscount or inDiscount) and conf >= entryThreshold and validPlan
+shortSig = showEntry and bearBreak  and (not needDiscount or inPremium)  and conf >= entryThreshold and validPlan
 plotshape(longSig,  title = "LONG",  style = shape.labelup,   location = location.belowbar, color = bullCol, text = "LONG",  textcolor = color.white, size = size.small)
 plotshape(shortSig, title = "SHORT", style = shape.labeldown, location = location.abovebar, color = bearCol, text = "SHORT", textcolor = color.white, size = size.small)
-
-var float lastSL = na
-var float lastTP = na
-var int   lastDir = 0
-var int   lastConf = 0
-lastSL   := longSig ? slL : shortSig ? slS : lastSL
-lastTP   := longSig ? tpL : shortSig ? tpS : lastTP
-lastDir  := longSig ? 1 : shortSig ? -1 : lastDir
-lastConf := longSig ? confBull : shortSig ? confBear : lastConf
 
 // ---- ALERTS -----------------------------------------------------------------
 alertcondition(longSig,  "LONG Setup",  "Turhal AI PRO Lite: high-quality LONG setup")
@@ -150,21 +153,18 @@ alertcondition(shortSig, "SHORT Setup", "Turhal AI PRO Lite: high-quality SHORT 
 alertcondition(bullBreak, "Bullish BOS/CHoCH", "Turhal AI PRO Lite: bullish structure break")
 alertcondition(bearBreak, "Bearish BOS/CHoCH", "Turhal AI PRO Lite: bearish structure break")
 
-// ---- SIGNAL STRENGTH (trend quality) ---------------------------------------
-sMTF = trend == 0 ? 0.0 : (((trend == 1 and htf1Bull) or (trend == -1 and not htf1Bull)) ? 20.0 : 0.0) + (((trend == 1 and htf2Bull) or (trend == -1 and not htf2Bull)) ? 30.0 : 0.0)
-sATR = (not na(atrVal) and atrVal > 0) ? math.min(25.0, bodySize / atrVal * 15.0) : 0.0
-sVOL = (not na(volume) and not na(volMA) and volMA > 0) ? math.min(25.0, volume / volMA * 12.0) : 0.0
-score = math.min(100, int(math.round(sMTF + sATR + sVOL)))
-
-// ---- DASHBOARD (flat: unconditional cells) ---------------------------------
-scCol = score >= 70 ? bullCol : score >= 40 ? color.new(#ffb300, 0) : color.gray
+// ---- DASHBOARD (flat: unconditional cells, all values live each bar) --------
+scCol   = conf >= 70 ? bullCol : conf >= 40 ? color.new(#ffb300, 0) : color.gray
 zoneTxt = na(pdEq) ? "-" : inDiscount ? "DISCOUNT" : "PREMIUM"
 zoneCol = na(pdEq) ? color.gray : inDiscount ? discCol : premCol
-setupTxt = lastDir == 0 ? "-" : (lastDir == 1 ? "LONG " : "SHORT ") + str.tostring(lastConf) + "%"
-setupCol = lastDir == 1 ? bullCol : lastDir == -1 ? bearCol : color.gray
+setupTxt = trend == 0 ? "-" : (trend == 1 ? "LONG " : "SHORT ") + str.tostring(conf) + "%"
+setupCol = trend == 1 ? bullCol : trend == -1 ? bearCol : color.gray
+armed    = trend != 0 and (not needDiscount or zoneOK) and conf >= entryThreshold and validPlan
+stateTxt = trend == 0 ? "NO TREND" : not validPlan ? "INVALID" : armed ? "READY" : "WAIT"
+stateCol = armed ? bullCol : trend == 0 ? color.gray : color.new(#ffb300, 0)
 hd = color.new(color.black, 10)
 kb = color.new(color.black, 25)
-var table dash = table.new(position.top_right, 2, 8, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+var table dash = table.new(position.top_right, 2, 12, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
 table.cell(dash, 0, 0, "Turhal AI PRO", text_color = color.white, bgcolor = hd, text_size = size.small)
 table.cell(dash, 1, 0, "Lite", text_color = color.white, bgcolor = hd, text_size = size.small)
 table.cell(dash, 0, 1, "Trend", text_color = color.white, bgcolor = kb, text_size = size.small)
@@ -176,8 +176,16 @@ table.cell(dash, 1, 3, f_biasTxt(htf2Bull), text_color = color.white, bgcolor = 
 table.cell(dash, 0, 4, "Zone", text_color = color.white, bgcolor = kb, text_size = size.small)
 table.cell(dash, 1, 4, zoneTxt, text_color = color.white, bgcolor = color.new(zoneCol, 25), text_size = size.small)
 table.cell(dash, 0, 5, "Signal", text_color = color.white, bgcolor = kb, text_size = size.small)
-table.cell(dash, 1, 5, str.tostring(score) + " %", text_color = color.white, bgcolor = color.new(scCol, 20), text_size = size.small)
+table.cell(dash, 1, 5, str.tostring(conf) + " %", text_color = color.white, bgcolor = color.new(scCol, 20), text_size = size.small)
 table.cell(dash, 0, 6, "Setup", text_color = color.white, bgcolor = kb, text_size = size.small)
 table.cell(dash, 1, 6, setupTxt, text_color = color.white, bgcolor = color.new(setupCol, 25), text_size = size.small)
-table.cell(dash, 0, 7, "SL / TP", text_color = color.white, bgcolor = kb, text_size = size.tiny)
-table.cell(dash, 1, 7, na(lastSL) ? "-" : str.tostring(lastSL, format.mintick) + " / " + str.tostring(lastTP, format.mintick), text_color = color.white, bgcolor = kb, text_size = size.tiny)
+table.cell(dash, 0, 7, "State", text_color = color.white, bgcolor = kb, text_size = size.small)
+table.cell(dash, 1, 7, stateTxt, text_color = color.white, bgcolor = color.new(stateCol, 25), text_size = size.small)
+table.cell(dash, 0, 8, "Entry", text_color = color.white, bgcolor = kb, text_size = size.tiny)
+table.cell(dash, 1, 8, f_px(entryP), text_color = color.white, bgcolor = kb, text_size = size.tiny)
+table.cell(dash, 0, 9, "SL", text_color = color.white, bgcolor = kb, text_size = size.tiny)
+table.cell(dash, 1, 9, f_px(validPlan ? slLive : na), text_color = color.white, bgcolor = color.new(bearCol, 40), text_size = size.tiny)
+table.cell(dash, 0, 10, "TP1 / TP2", text_color = color.white, bgcolor = kb, text_size = size.tiny)
+table.cell(dash, 1, 10, f_px(tp1Live) + " / " + f_px(tp2Live), text_color = color.white, bgcolor = color.new(bullCol, 40), text_size = size.tiny)
+table.cell(dash, 0, 11, "TP3", text_color = color.white, bgcolor = kb, text_size = size.tiny)
+table.cell(dash, 1, 11, f_px(tp3Live), text_color = color.white, bgcolor = color.new(bullCol, 40), text_size = size.tiny)
