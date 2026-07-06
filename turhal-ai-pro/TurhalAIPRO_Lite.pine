@@ -2,9 +2,9 @@
 // ============================================================================
 //  Turhal AI PRO — Lite   (flat / mobile-safe)  ·  with Shadow Mode analytics
 //  Author: berkayturhal38 | License: MPL-2.0
-//  Shadow Mode is a READ-ONLY analytics layer. It never modifies the real
-//  signals, entry engine, confidence or setup lock. Confirmed-only, no
-//  lookahead / no repaint. Outcomes are measured on later bars only.
+//  Shadow Mode = READ-ONLY analytics. Never modifies real signals/engine.
+//  Confirmed-only, no lookahead / no repaint. Outcomes measured on later bars.
+//  Table rows use the tc() helper so every line stays short (mobile-paste safe).
 // ============================================================================
 indicator("Turhal AI PRO — Lite", "Turhal AI PRO Lite", overlay = true, max_lines_count = 500, max_labels_count = 500)
 
@@ -63,6 +63,8 @@ f_biasCol(bool b) => b ? bullCol : bearCol
 f_px(float v) => na(v) ? "-" : str.tostring(v, format.mintick)
 f_sh(string s) => showShadow ? s : ""
 f_wt(int w, int t) => str.tostring(w) + "/" + str.tostring(t)
+tcs(table tb, int c, int r, string s, color bg) => table.cell(tb, c, r, s, text_color = color.white, bgcolor = bg, text_size = size.small)
+tct(table tb, int c, int r, string s, color bg) => table.cell(tb, c, r, s, text_color = color.white, bgcolor = bg, text_size = size.tiny)
 
 atrVal   = ta.atr(atrLen)
 bodySize = math.abs(close - open)
@@ -179,10 +181,6 @@ failConf  = conf < entryThreshold
 failBreak = not ((trend == 1 and bullBreak) or (trend == -1 and bearBreak))
 nFail = (failMTF ? 1 : 0) + (failZone ? 1 : 0) + (failConf ? 1 : 0) + (failBreak ? 1 : 0)
 momOK = trend == 1 ? bScore >= 0 : trend == -1 ? bScore <= 0 : false
-
-// Minimum candidate criteria: a real trend, no live trade, plan valid,
-// confidence not trivially low, and momentum not opposing. Open on the
-// RISING EDGE only (a new independent opportunity), gated by a cooldown.
 candOK = shadowOn and trend != 0 and not hasSetup and not longSig and not shortSig and validPlan and conf >= candMinConf and momOK
 candEdge = candOK and not candOK[1]
 
@@ -207,7 +205,6 @@ resolveSL  = okBar and shDir != 0 and slNow and not ambig
 resolved = ambig or resolveTP3 or resolveSL
 newReached = math.max(shReached, rNow)
 
-// Raw outcome classes (mutually exclusive). WIN (for Win Rate) = TP2 or TP3.
 outTP3   = resolveTP3
 outTP2SL = resolveSL and newReached == 2
 outTP1SL = resolveSL and newReached == 1
@@ -290,35 +287,44 @@ stateTxt = hasSetup ? "READY" : trend == 0 ? "NO TREND" : not validPlan ? "INVAL
 stateCol = hasSetup ? (sDir == 1 ? bullCol : bearCol) : trend == 0 ? color.gray : not validPlan ? bearCol : color.new(#ffb300, 0)
 hd = color.new(color.black, 10)
 kb = color.new(color.black, 25)
+trCol = color.new(f_trCol(trend), 25)
+biCol = color.new(biasCol, 20)
+h1Col = color.new(f_biasCol(htf1Bull), 25)
+h2Col = color.new(f_biasCol(htf2Bull), 25)
+zCol = color.new(zoneCol, 25)
+sgCol = color.new(scCol, 20)
+stpCol = color.new(setupCol, 25)
+stCol = color.new(stateCol, 25)
+slCol = hasSetup ? color.new(bearCol, 40) : kb
+tpCol = hasSetup ? color.new(bullCol, 40) : kb
 var table dash = table.new(position.top_right, 2, 13, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
-table.cell(dash, 0, 0, "Turhal AI PRO", text_color = color.white, bgcolor = hd, text_size = size.small)
-table.cell(dash, 1, 0, "Lite", text_color = color.white, bgcolor = hd, text_size = size.small)
-table.cell(dash, 0, 1, "Trend", text_color = color.white, bgcolor = kb, text_size = size.small)
-table.cell(dash, 1, 1, f_trTxt(trend), text_color = color.white, bgcolor = color.new(f_trCol(trend), 25), text_size = size.small)
-table.cell(dash, 0, 2, "Bias", text_color = color.white, bgcolor = kb, text_size = size.small)
-table.cell(dash, 1, 2, biasTxt, text_color = color.white, bgcolor = color.new(biasCol, 20), text_size = size.small)
-table.cell(dash, 0, 3, "1H", text_color = color.white, bgcolor = kb, text_size = size.small)
-table.cell(dash, 1, 3, f_biasTxt(htf1Bull), text_color = color.white, bgcolor = color.new(f_biasCol(htf1Bull), 25), text_size = size.small)
-table.cell(dash, 0, 4, "4H", text_color = color.white, bgcolor = kb, text_size = size.small)
-table.cell(dash, 1, 4, f_biasTxt(htf2Bull), text_color = color.white, bgcolor = color.new(f_biasCol(htf2Bull), 25), text_size = size.small)
-table.cell(dash, 0, 5, "Zone", text_color = color.white, bgcolor = kb, text_size = size.small)
-table.cell(dash, 1, 5, zoneTxt, text_color = color.white, bgcolor = color.new(zoneCol, 25), text_size = size.small)
-table.cell(dash, 0, 6, "Signal", text_color = color.white, bgcolor = kb, text_size = size.small)
-table.cell(dash, 1, 6, str.tostring(conf) + " %", text_color = color.white, bgcolor = color.new(scCol, 20), text_size = size.small)
-table.cell(dash, 0, 7, "Setup", text_color = color.white, bgcolor = kb, text_size = size.small)
-table.cell(dash, 1, 7, setupTxt, text_color = color.white, bgcolor = color.new(setupCol, 25), text_size = size.small)
-table.cell(dash, 0, 8, "State", text_color = color.white, bgcolor = kb, text_size = size.small)
-table.cell(dash, 1, 8, stateTxt, text_color = color.white, bgcolor = color.new(stateCol, 25), text_size = size.small)
-table.cell(dash, 0, 9, "Entry", text_color = color.white, bgcolor = kb, text_size = size.tiny)
-table.cell(dash, 1, 9, f_px(hasSetup ? sEntry : na), text_color = color.white, bgcolor = kb, text_size = size.tiny)
-table.cell(dash, 0, 10, "SL", text_color = color.white, bgcolor = kb, text_size = size.tiny)
-table.cell(dash, 1, 10, f_px(hasSetup ? sSL : na), text_color = color.white, bgcolor = hasSetup ? color.new(bearCol, 40) : kb, text_size = size.tiny)
-table.cell(dash, 0, 11, "TP1 / TP2", text_color = color.white, bgcolor = kb, text_size = size.tiny)
-table.cell(dash, 1, 11, f_px(hasSetup ? sTP1 : na) + " / " + f_px(hasSetup ? sTP2 : na), text_color = color.white, bgcolor = hasSetup ? color.new(bullCol, 40) : kb, text_size = size.tiny)
-table.cell(dash, 0, 12, "TP3", text_color = color.white, bgcolor = kb, text_size = size.tiny)
-table.cell(dash, 1, 12, f_px(hasSetup ? sTP3 : na), text_color = color.white, bgcolor = hasSetup ? color.new(bullCol, 40) : kb, text_size = size.tiny)
+tcs(dash, 0, 0, "Turhal AI PRO", hd)
+tcs(dash, 1, 0, "Lite", hd)
+tcs(dash, 0, 1, "Trend", kb)
+tcs(dash, 1, 1, f_trTxt(trend), trCol)
+tcs(dash, 0, 2, "Bias", kb)
+tcs(dash, 1, 2, biasTxt, biCol)
+tcs(dash, 0, 3, "1H", kb)
+tcs(dash, 1, 3, f_biasTxt(htf1Bull), h1Col)
+tcs(dash, 0, 4, "4H", kb)
+tcs(dash, 1, 4, f_biasTxt(htf2Bull), h2Col)
+tcs(dash, 0, 5, "Zone", kb)
+tcs(dash, 1, 5, zoneTxt, zCol)
+tcs(dash, 0, 6, "Signal", kb)
+tcs(dash, 1, 6, str.tostring(conf) + " %", sgCol)
+tcs(dash, 0, 7, "Setup", kb)
+tcs(dash, 1, 7, setupTxt, stpCol)
+tcs(dash, 0, 8, "State", kb)
+tcs(dash, 1, 8, stateTxt, stCol)
+tct(dash, 0, 9, "Entry", kb)
+tct(dash, 1, 9, f_px(hasSetup ? sEntry : na), kb)
+tct(dash, 0, 10, "SL", kb)
+tct(dash, 1, 10, f_px(hasSetup ? sSL : na), slCol)
+tct(dash, 0, 11, "TP1 / TP2", kb)
+tct(dash, 1, 11, f_px(hasSetup ? sTP1 : na) + " / " + f_px(hasSetup ? sTP2 : na), tpCol)
+tct(dash, 0, 12, "TP3", kb)
+tct(dash, 1, 12, f_px(hasSetup ? sTP3 : na), tpCol)
 
-// ---- SHADOW PANEL (bottom-left; compact; win=TP2+, denom=concluded) ---------
 shDone = cTP3 + cTP2SL + cTP1SL + cSL
 shWins = cTP3 + cTP2SL
 shActive = shTotal - shDone - cAmb
@@ -326,30 +332,39 @@ shWR = shDone > 0 ? int(math.round(shWins * 100.0 / shDone)) : 0
 shWRcol = shWR >= 55 ? bullCol : shWR >= 45 ? color.new(#ffb300, 0) : bearCol
 sb = color.new(color.black, 20)
 sk = color.new(color.black, 35)
+wrCol = color.new(shWRcol, 25)
+onCol = shadowOn ? color.new(bullCol, 30) : sk
+tActAmb = str.tostring(shActive) + " / " + str.tostring(cAmb)
+tTp32 = str.tostring(cTP3) + " / " + str.tostring(cTP2SL)
+tTp1sl = str.tostring(cTP1SL) + " / " + str.tostring(cSL)
+tMtf = f_wt(mtfW, mtfT) + " - " + f_wt(mtfOW, mtfOT)
+tZn = f_wt(znW, znT) + " - " + f_wt(znOW, znOT)
+tCn = f_wt(cnW, cnT) + " - " + f_wt(cnOW, cnOT)
+tBk = f_wt(bkW, bkT) + " - " + f_wt(bkOW, bkOT)
 var table sh = table.new(position.bottom_left, 2, 13, border_width = 1, frame_color = color.new(color.gray, 55), frame_width = 1)
-table.cell(sh, 0, 0, f_sh("SHADOW"), text_color = color.white, bgcolor = sb, text_size = size.tiny)
-table.cell(sh, 1, 0, f_sh(shadowOn ? "ON" : "OFF"), text_color = color.white, bgcolor = shadowOn ? color.new(bullCol, 30) : sk, text_size = size.tiny)
-table.cell(sh, 0, 1, f_sh("Opened"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 1, 1, f_sh(str.tostring(shTotal)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 0, 2, f_sh("Concluded"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 1, 2, f_sh(str.tostring(shDone)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 0, 3, f_sh("Active/Amb"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 1, 3, f_sh(str.tostring(shActive) + " / " + str.tostring(cAmb)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 0, 4, f_sh("Win% (TP2+)"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 1, 4, f_sh(str.tostring(shWR) + " %"), text_color = color.white, bgcolor = color.new(shWRcol, 25), text_size = size.tiny)
-table.cell(sh, 0, 5, f_sh("TP3 / TP2>SL"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 1, 5, f_sh(str.tostring(cTP3) + " / " + str.tostring(cTP2SL)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 0, 6, f_sh("TP1>SL / SL"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 1, 6, f_sh(str.tostring(cTP1SL) + " / " + str.tostring(cSL)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 0, 7, f_sh("blk win/tot"), text_color = color.white, bgcolor = sb, text_size = size.tiny)
-table.cell(sh, 1, 7, f_sh("all - only"), text_color = color.white, bgcolor = sb, text_size = size.tiny)
-table.cell(sh, 0, 8, f_sh("MTF"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 1, 8, f_sh(f_wt(mtfW, mtfT) + " - " + f_wt(mtfOW, mtfOT)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 0, 9, f_sh("ZONE"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 1, 9, f_sh(f_wt(znW, znT) + " - " + f_wt(znOW, znOT)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 0, 10, f_sh("CONF"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 1, 10, f_sh(f_wt(cnW, cnT) + " - " + f_wt(cnOW, cnOT)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 0, 11, f_sh("BREAK"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 1, 11, f_sh(f_wt(bkW, bkT) + " - " + f_wt(bkOW, bkOT)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 0, 12, f_sh("win = TP2+"), text_color = color.white, bgcolor = sb, text_size = size.tiny)
-table.cell(sh, 1, 12, f_sh("amb excl."), text_color = color.white, bgcolor = sb, text_size = size.tiny)
+tct(sh, 0, 0, f_sh("SHADOW"), sb)
+tct(sh, 1, 0, f_sh(shadowOn ? "ON" : "OFF"), onCol)
+tct(sh, 0, 1, f_sh("Opened"), sk)
+tct(sh, 1, 1, f_sh(str.tostring(shTotal)), sk)
+tct(sh, 0, 2, f_sh("Concluded"), sk)
+tct(sh, 1, 2, f_sh(str.tostring(shDone)), sk)
+tct(sh, 0, 3, f_sh("Active/Amb"), sk)
+tct(sh, 1, 3, f_sh(tActAmb), sk)
+tct(sh, 0, 4, f_sh("Win% TP2+"), sk)
+tct(sh, 1, 4, f_sh(str.tostring(shWR) + " %"), wrCol)
+tct(sh, 0, 5, f_sh("TP3 / TP2>SL"), sk)
+tct(sh, 1, 5, f_sh(tTp32), sk)
+tct(sh, 0, 6, f_sh("TP1>SL / SL"), sk)
+tct(sh, 1, 6, f_sh(tTp1sl), sk)
+tct(sh, 0, 7, f_sh("blk w/t"), sb)
+tct(sh, 1, 7, f_sh("all-only"), sb)
+tct(sh, 0, 8, f_sh("MTF"), sk)
+tct(sh, 1, 8, f_sh(tMtf), sk)
+tct(sh, 0, 9, f_sh("ZONE"), sk)
+tct(sh, 1, 9, f_sh(tZn), sk)
+tct(sh, 0, 10, f_sh("CONF"), sk)
+tct(sh, 1, 10, f_sh(tCn), sk)
+tct(sh, 0, 11, f_sh("BREAK"), sk)
+tct(sh, 1, 11, f_sh(tBk), sk)
+tct(sh, 0, 12, f_sh("win=TP2+"), sb)
+tct(sh, 1, 12, f_sh("amb excl"), sb)
