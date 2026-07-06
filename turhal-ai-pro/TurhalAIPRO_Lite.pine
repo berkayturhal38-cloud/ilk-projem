@@ -49,6 +49,12 @@ showShadow  = input.bool(true, "Show Shadow Panel", group = gSh)
 candMinConf = input.int(40, "Shadow Min Candidate Conf (%)", minval = 0, maxval = 100, group = gSh)
 shCoolBars  = input.int(10, "Shadow Cooldown (bars)", minval = 0, group = gSh)
 
+gEw = "Entry Window Shadow"
+ewOn      = input.bool(true, "Enable Entry Window Shadow", group = gEw)
+ewBars    = input.int(10, "Entry Window Bars", minval = 1, group = gEw)
+ewMinConf = input.int(40, "Entry Window Min Confidence", minval = 0, maxval = 100, group = gEw)
+showEW    = input.bool(true, "Show Entry Window Panel", group = gEw)
+
 gC = "Colors"
 bullCol  = input.color(#26a69a, "Bullish", group = gC)
 bearCol  = input.color(#ef5350, "Bearish", group = gC)
@@ -62,6 +68,7 @@ f_biasTxt(bool b) => b ? "BULLISH" : "BEARISH"
 f_biasCol(bool b) => b ? bullCol : bearCol
 f_px(float v) => na(v) ? "-" : str.tostring(v, format.mintick)
 f_sh(string s) => showShadow ? s : ""
+f_ew(string s) => showEW ? s : ""
 f_wt(int w, int t) => str.tostring(w) + "/" + str.tostring(t)
 tcs(table tb, int c, int r, string s, color bg) => table.cell(tb, c, r, s, text_color = color.white, bgcolor = bg, text_size = size.small)
 tct(table tb, int c, int r, string s, color bg) => table.cell(tb, c, r, s, text_color = color.white, bgcolor = bg, text_size = size.tiny)
@@ -270,6 +277,65 @@ fConf  := shOpen ? failConf : resolved ? false : fConf
 fBreak := shOpen ? failBreak : resolved ? false : fBreak
 shCool := shOpen ? shCoolBars : math.max(0, shCool - (okBar ? 1 : 0))
 
+// ============================================================================
+//  ENTRY WINDOW SHADOW  (read-only; entries in the N bars AFTER a break)
+//  Hypothesis: quality setups often appear a few bars after BOS/CHoCH, which
+//  the real engine (break-bar-only entry) misses. NEVER enters on the break
+//  bar. One virtual trade per window. Confirmed-only, no lookahead/repaint.
+// ============================================================================
+brkBar = bullBreak or bearBreak
+ewNewWin = ewOn and okBar and brkBar
+var int   ewWinDir = 0
+var int   ewWinLeft = 0
+var bool  ewWinUsed = false
+var int   ewDir = 0
+var float ewSL = na
+var float ewTP1 = na
+var float ewTP2 = na
+var float ewTP3 = na
+var int   ewReached = 0
+
+ewWinOpenNow = ewWinDir != 0 and ewWinLeft > 0
+ewDelayNow = ewBars - ewWinLeft + 1
+ewQual = ewOn and okBar and ewWinOpenNow and not brkBar and ewDir == 0 and not ewWinUsed and trend == ewWinDir and (not needDiscount or zoneOK) and conf >= ewMinConf and validPlan
+
+ewRNow = ewDir == 1 ? (high >= ewTP3 ? 3 : high >= ewTP2 ? 2 : high >= ewTP1 ? 1 : 0) : ewDir == -1 ? (low <= ewTP3 ? 3 : low <= ewTP2 ? 2 : low <= ewTP1 ? 1 : 0) : 0
+ewSlNow = ewDir == 1 ? (low <= ewSL) : ewDir == -1 ? (high >= ewSL) : false
+ewAmbig = okBar and ewDir != 0 and ewSlNow and ewRNow > ewReached
+ewResTP3 = okBar and ewDir != 0 and ewRNow >= 3 and not ewAmbig
+ewResSL  = okBar and ewDir != 0 and ewSlNow and not ewAmbig
+ewResolved = ewAmbig or ewResTP3 or ewResSL
+ewNewReached = math.max(ewReached, ewRNow)
+ewOutTP3 = ewResTP3
+ewOutTP2SL = ewResSL and ewNewReached == 2
+ewOutTP1SL = ewResSL and ewNewReached == 1
+ewOutSL = ewResSL and ewNewReached == 0
+
+var int ewTotal = 0
+var int ewC3 = 0
+var int ewC2 = 0
+var int ewC1 = 0
+var int ewCSL = 0
+var int ewCAmb = 0
+var int ewDelaySum = 0
+ewTotal := ewTotal + (ewQual ? 1 : 0)
+ewC3    := ewC3 + (ewOutTP3 ? 1 : 0)
+ewC2    := ewC2 + (ewOutTP2SL ? 1 : 0)
+ewC1    := ewC1 + (ewOutTP1SL ? 1 : 0)
+ewCSL   := ewCSL + (ewOutSL ? 1 : 0)
+ewCAmb  := ewCAmb + (ewAmbig ? 1 : 0)
+ewDelaySum := ewDelaySum + (ewQual ? ewDelayNow : 0)
+
+ewDir     := ewQual ? ewWinDir : ewResolved ? 0 : ewDir
+ewSL      := ewQual ? planSL : ewResolved ? na : ewSL
+ewTP1     := ewQual ? planTP1 : ewResolved ? na : ewTP1
+ewTP2     := ewQual ? planTP2 : ewResolved ? na : ewTP2
+ewTP3     := ewQual ? planTP3 : ewResolved ? na : ewTP3
+ewReached := ewQual ? 0 : ewResolved ? 0 : ewNewReached
+ewWinUsed := ewNewWin ? false : ewQual ? true : ewWinUsed
+ewWinDir  := ewNewWin ? (bullBreak ? 1 : -1) : (okBar and ewWinLeft <= 1 ? 0 : ewWinDir)
+ewWinLeft := ewNewWin ? ewBars : (okBar ? math.max(0, ewWinLeft - 1) : ewWinLeft)
+
 alertcondition(longSig,  "LONG Setup",  "Turhal AI PRO Lite: high-quality LONG setup")
 alertcondition(shortSig, "SHORT Setup", "Turhal AI PRO Lite: high-quality SHORT setup")
 alertcondition(bullBreak, "Bullish BOS/CHoCH", "Turhal AI PRO Lite: bullish structure break")
@@ -368,3 +434,29 @@ tct(sh, 0, 11, f_sh("BREAK"), sk)
 tct(sh, 1, 11, f_sh(tBk), sk)
 tct(sh, 0, 12, f_sh("win=TP2+"), sb)
 tct(sh, 1, 12, f_sh("amb excl"), sb)
+
+ewDone = ewC3 + ewC2 + ewC1 + ewCSL
+ewWins = ewC3 + ewC2
+ewWR = ewDone > 0 ? int(math.round(ewWins * 100.0 / ewDone)) : 0
+ewAvgD = ewTotal > 0 ? int(math.round(ewDelaySum * 1.0 / ewTotal)) : 0
+ewWRcol = ewWR >= 55 ? bullCol : ewWR >= 45 ? color.new(#ffb300, 0) : bearCol
+ewOnCol = ewOn ? color.new(bullCol, 30) : sk
+eTp32 = str.tostring(ewC3) + " / " + str.tostring(ewC2)
+eTp1sl = str.tostring(ewC1) + " / " + str.tostring(ewCSL)
+var table ewt = table.new(position.top_left, 2, 8, border_width = 1, frame_color = color.new(color.gray, 55), frame_width = 1)
+tct(ewt, 0, 0, f_ew("ENTRY WIN"), sb)
+tct(ewt, 1, 0, f_ew(ewOn ? "ON" : "OFF"), ewOnCol)
+tct(ewt, 0, 1, f_ew("Opened"), sk)
+tct(ewt, 1, 1, f_ew(str.tostring(ewTotal)), sk)
+tct(ewt, 0, 2, f_ew("Concluded"), sk)
+tct(ewt, 1, 2, f_ew(str.tostring(ewDone)), sk)
+tct(ewt, 0, 3, f_ew("Win% TP2+"), sk)
+tct(ewt, 1, 3, f_ew(str.tostring(ewWR) + " %"), ewWRcol)
+tct(ewt, 0, 4, f_ew("TP3 / TP2>SL"), sk)
+tct(ewt, 1, 4, f_ew(eTp32), sk)
+tct(ewt, 0, 5, f_ew("TP1>SL / SL"), sk)
+tct(ewt, 1, 5, f_ew(eTp1sl), sk)
+tct(ewt, 0, 6, f_ew("Amb"), sk)
+tct(ewt, 1, 6, f_ew(str.tostring(ewCAmb)), sk)
+tct(ewt, 0, 7, f_ew("Avg delay"), sk)
+tct(ewt, 1, 7, f_ew(str.tostring(ewAvgD) + " bar"), sk)
