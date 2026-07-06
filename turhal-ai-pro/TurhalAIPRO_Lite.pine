@@ -1,12 +1,13 @@
 //@version=6
 // ============================================================================
 //  Turhal AI PRO — Lite   (flat / mobile-safe: no if/for/blocks)
-//  SMC essentials: swings, BOS/CHoCH, trend, MTF bias, premium/discount,
-//  entry arrows with 0-100 confidence, dashboard, alerts. Non-repaint:
-//  confirmed pivots + barstate.isconfirmed + MTF lookahead_off.
-//  STABLE BUILD: one single confidence feeds BOTH Signal and Setup; Entry,
-//  SL, TP1/TP2/TP3 are recomputed live every bar (no stale/locked values);
-//  every price uses format.mintick.
+//  SMC essentials with a STABLE, NON-REPAINT signal engine:
+//   * LONG/SHORT arrows fire only on the confirmed break bar and never move.
+//   * On READY the trade plan (Entry/SL/TP1-3) is LOCKED and stays fixed
+//     until a new valid setup or the setup is cancelled (SL/TP hit or flip).
+//   * WAIT / NO TREND / INVALID  ->  plan cells show "-".
+//   * ONE confidence feeds Signal and Setup (never contradictory).
+//   * Structure trend (setups) is separate from a fast EMA+MTF Bias readout.
 //  Author: berkayturhal38 | License: MPL-2.0
 // ============================================================================
 indicator("Turhal AI PRO — Lite", "Turhal AI PRO Lite", overlay = true, max_lines_count = 500, max_labels_count = 500)
@@ -30,6 +31,10 @@ mtfFilter = input.bool(true, "Require MTF bias alignment", group = gM)
 htfTf1    = input.timeframe("60",  "Higher Timeframe 1", group = gM)
 htfTf2    = input.timeframe("240", "Higher Timeframe 2", group = gM)
 emaLen    = input.int(50, "HTF EMA Length", minval = 1, group = gM)
+
+gMo = "Momentum Bias"
+emaFastLen = input.int(21, "EMA Fast", minval = 1, group = gMo)
+emaSlowLen = input.int(55, "EMA Slow", minval = 1, group = gMo)
 
 gPD = "Premium / Discount"
 showPD = input.bool(true, "Show Premium/Discount zone", group = gPD)
@@ -57,7 +62,7 @@ f_biasTxt(bool b) => b ? "BULLISH" : "BEARISH"
 f_biasCol(bool b) => b ? bullCol : bearCol
 f_px(float v) => na(v) ? "-" : str.tostring(v, format.mintick)
 
-// ---- VOLATILITY & FILTERS ---------------------------------------------------
+// ---- 1) FILTERS (ATR / Volume) ---------------------------------------------
 atrVal   = ta.atr(atrLen)
 bodySize = math.abs(close - open)
 volMA    = ta.sma(volume, volLen)
@@ -65,13 +70,20 @@ atrOK    = not useATR or (not na(atrVal) and bodySize >= atrVal * atrMult)
 volOK    = not useVol or na(volume) or (not na(volMA) and volume >= volMA * volMult)
 strong   = atrOK and volOK
 
-// ---- MULTI-TIMEFRAME BIAS (flat, non-repaint) -------------------------------
+// ---- 2) MULTI-TIMEFRAME BIAS (non-repaint: lookahead_off) -------------------
 htf1Bull = request.security(syminfo.tickerid, htfTf1, close > ta.ema(close, emaLen), lookahead = barmerge.lookahead_off)
 htf2Bull = request.security(syminfo.tickerid, htfTf2, close > ta.ema(close, emaLen), lookahead = barmerge.lookahead_off)
 bullMTFok = not mtfFilter or (htf1Bull and htf2Bull)
 bearMTFok = not mtfFilter or (not htf1Bull and not htf2Bull)
 
-// ---- SWINGS (confirmed pivots) ---------------------------------------------
+// ---- MOMENTUM BIAS (5-level, reacts to price; separate from structure) ------
+emaF = ta.ema(close, emaFastLen)
+emaS = ta.ema(close, emaSlowLen)
+bScore = (close > emaF ? 1 : -1) + (emaF > emaS ? 1 : -1) + (htf1Bull ? 1 : -1) + (htf2Bull ? 1 : -1)
+biasTxt = bScore >= 3 ? "STRONG BULL" : bScore >= 1 ? "BULLISH" : bScore <= -3 ? "STRONG BEAR" : bScore <= -1 ? "BEARISH" : "NEUTRAL"
+biasCol = bScore >= 3 ? bullCol : bScore >= 1 ? color.new(bullCol, 35) : bScore <= -3 ? bearCol : bScore <= -1 ? color.new(bearCol, 35) : color.gray
+
+// ---- 3) SWINGS (confirmed pivots; markers drawn back with offset) -----------
 ph = ta.pivothigh(swingLen, swingLen)
 pl = ta.pivotlow(swingLen, swingLen)
 var float lastPH = na
@@ -86,7 +98,7 @@ lastPLx := na(pl) ? lastPLx : bar_index - swingLen
 plotshape(showSwings and not na(ph), title = "Swing High", style = shape.triangledown, location = location.abovebar, color = swingCol, offset = -swingLen, size = size.tiny)
 plotshape(showSwings and not na(pl), title = "Swing Low",  style = shape.triangleup,   location = location.belowbar, color = swingCol, offset = -swingLen, size = size.tiny)
 
-// ---- MARKET STRUCTURE: BOS / CHoCH (flat state machine) ---------------------
+// ---- 4) MARKET STRUCTURE: BOS / CHoCH (confirmed-only state machine) --------
 var float upLevel = na
 var bool  upBroken = false
 var float dnLevel = na
@@ -110,7 +122,7 @@ plotshape(showBreaks and bearBreak and not isChochDn, title = "BOS Down", style 
 plotshape(showBreaks and isChochUp, title = "CHoCH Up",   style = shape.diamond, location = location.belowbar, color = color.yellow, text = "CHoCH", textcolor = color.white, size = size.tiny)
 plotshape(showBreaks and isChochDn, title = "CHoCH Down", style = shape.diamond, location = location.abovebar, color = color.yellow, text = "CHoCH", textcolor = color.white, size = size.tiny)
 
-// ---- PREMIUM / DISCOUNT -----------------------------------------------------
+// ---- 5) PREMIUM / DISCOUNT --------------------------------------------------
 pdEq = (not na(lastPH) and not na(lastPL)) ? (lastPH + lastPL) / 2 : na
 inDiscount = not na(pdEq) and close < pdEq
 inPremium  = not na(pdEq) and close > pdEq
@@ -120,32 +132,48 @@ pLo = plot(showPD ? lastPL : na, "Range Low", color = color.new(discCol, 55), st
 fill(pHi, pEq, color = color.new(premCol, 90), title = "Premium")
 fill(pEq, pLo, color = color.new(discCol, 90), title = "Discount")
 
-// ---- SINGLE CONFIDENCE (0-100) — feeds BOTH Signal and Setup ---------------
-// Directional alignment is evaluated for the *current trend* only, so the
-// number shown as Signal is always the same number used by the Setup/entry.
-al1   = trend == 1 ? htf1Bull : trend == -1 ? not htf1Bull : false
-al2   = trend == 1 ? htf2Bull : trend == -1 ? not htf2Bull : false
+// ---- 6) SINGLE CONFIDENCE (0-100) — feeds BOTH Signal and Setup ------------
+al1    = trend == 1 ? htf1Bull : trend == -1 ? not htf1Bull : false
+al2    = trend == 1 ? htf2Bull : trend == -1 ? not htf2Bull : false
 zoneOK = trend == 1 ? inDiscount : trend == -1 ? inPremium : false
-cMTF  = (al1 ? 20.0 : 0.0) + (al2 ? 25.0 : 0.0)
-cDisp = (not na(atrVal) and atrVal > 0) ? math.min(25.0, bodySize / atrVal * 17.0) : 0.0
-cVol  = (not na(volume) and not na(volMA) and volMA > 0) ? math.min(15.0, volume / volMA * 8.0) : 0.0
-cZone = zoneOK ? 15.0 : 0.0
-conf  = trend == 0 ? 0 : int(math.min(100, math.round(cMTF + cDisp + cVol + cZone)))
+cMTF   = (al1 ? 20.0 : 0.0) + (al2 ? 25.0 : 0.0)
+cDisp  = (not na(atrVal) and atrVal > 0) ? math.min(25.0, bodySize / atrVal * 17.0) : 0.0
+cVol   = (not na(volume) and not na(volMA) and volMA > 0) ? math.min(15.0, volume / volMA * 8.0) : 0.0
+cZone  = zoneOK ? 15.0 : 0.0
+conf   = trend == 0 ? 0 : int(math.min(100, math.round(cMTF + cDisp + cVol + cZone)))
 
-// ---- LIVE TRADE PLAN for the current trend (Entry / SL / TP1-3) ------------
-entryP = trend == 0 ? na : close
-slLive = trend == 1 ? ((na(lastPL) ? low : math.min(lastPL, low)) - (na(atrVal) ? 0.0 : atrVal * slAtrMult)) : trend == -1 ? ((na(lastPH) ? high : math.max(lastPH, high)) + (na(atrVal) ? 0.0 : atrVal * slAtrMult)) : na
-riskLive = trend == 1 ? (entryP - slLive) : trend == -1 ? (slLive - entryP) : na
-validPlan = not na(riskLive) and riskLive > 0
-tp1Live = not validPlan ? na : trend == 1 ? entryP + riskLive * rr1 : entryP - riskLive * rr1
-tp2Live = not validPlan ? na : trend == 1 ? entryP + riskLive * rr2 : entryP - riskLive * rr2
-tp3Live = not validPlan ? na : trend == 1 ? entryP + riskLive * rr3 : entryP - riskLive * rr3
+// ---- 7) LIVE PLAN CANDIDATE (used only to LOCK on a signal; not displayed) --
+planEntry = trend == 0 ? na : close
+planSL = trend == 1 ? ((na(lastPL) ? low : math.min(lastPL, low)) - (na(atrVal) ? 0.0 : atrVal * slAtrMult)) : trend == -1 ? ((na(lastPH) ? high : math.max(lastPH, high)) + (na(atrVal) ? 0.0 : atrVal * slAtrMult)) : na
+planRisk = trend == 1 ? (planEntry - planSL) : trend == -1 ? (planSL - planEntry) : na
+validPlan = not na(planRisk) and planRisk > 0
+planTP1 = not validPlan ? na : trend == 1 ? planEntry + planRisk * rr1 : planEntry - planRisk * rr1
+planTP2 = not validPlan ? na : trend == 1 ? planEntry + planRisk * rr2 : planEntry - planRisk * rr2
+planTP3 = not validPlan ? na : trend == 1 ? planEntry + planRisk * rr3 : planEntry - planRisk * rr3
 
-// ---- ENTRY ARROWS (fire only on a fresh confirmed break) --------------------
-longSig  = showEntry and bullBreak  and (not needDiscount or inDiscount) and conf >= entryThreshold and validPlan
-shortSig = showEntry and bearBreak  and (not needDiscount or inPremium)  and conf >= entryThreshold and validPlan
+// ---- 8) SETUP CONDITIONS + ARROWS (fire only on a fresh confirmed break) ----
+longSig  = showEntry and bullBreak and (not needDiscount or inDiscount) and conf >= entryThreshold and validPlan
+shortSig = showEntry and bearBreak and (not needDiscount or inPremium)  and conf >= entryThreshold and validPlan
 plotshape(longSig,  title = "LONG",  style = shape.labelup,   location = location.belowbar, color = bullCol, text = "LONG",  textcolor = color.white, size = size.small)
 plotshape(shortSig, title = "SHORT", style = shape.labeldown, location = location.abovebar, color = bearCol, text = "SHORT", textcolor = color.white, size = size.small)
+
+// ---- 9) LOCK / CANCEL SETUP (values freeze until new setup or cancellation) -
+var int   sDir = 0
+var float sEntry = na
+var float sSL = na
+var float sTP1 = na
+var float sTP2 = na
+var float sTP3 = na
+cancelLong  = sDir == 1  and (low  <= sSL or high >= sTP3 or bearBreak)
+cancelShort = sDir == -1 and (high >= sSL or low  <= sTP3 or bullBreak)
+cleared = cancelLong or cancelShort
+sDir   := longSig ? 1 : shortSig ? -1 : cleared ? 0 : sDir
+sEntry := longSig ? planEntry : shortSig ? planEntry : cleared ? na : sEntry
+sSL    := longSig ? planSL : shortSig ? planSL : cleared ? na : sSL
+sTP1   := longSig ? planTP1 : shortSig ? planTP1 : cleared ? na : sTP1
+sTP2   := longSig ? planTP2 : shortSig ? planTP2 : cleared ? na : sTP2
+sTP3   := longSig ? planTP3 : shortSig ? planTP3 : cleared ? na : sTP3
+hasSetup = sDir != 0
 
 // ---- ALERTS -----------------------------------------------------------------
 alertcondition(longSig,  "LONG Setup",  "Turhal AI PRO Lite: high-quality LONG setup")
@@ -153,39 +181,43 @@ alertcondition(shortSig, "SHORT Setup", "Turhal AI PRO Lite: high-quality SHORT 
 alertcondition(bullBreak, "Bullish BOS/CHoCH", "Turhal AI PRO Lite: bullish structure break")
 alertcondition(bearBreak, "Bearish BOS/CHoCH", "Turhal AI PRO Lite: bearish structure break")
 
-// ---- DASHBOARD (flat: unconditional cells, all values live each bar) --------
+// ---- 10) DASHBOARD (all cells live; plan cells only when a setup is locked) --
 scCol   = conf >= 70 ? bullCol : conf >= 40 ? color.new(#ffb300, 0) : color.gray
 zoneTxt = na(pdEq) ? "-" : inDiscount ? "DISCOUNT" : "PREMIUM"
 zoneCol = na(pdEq) ? color.gray : inDiscount ? discCol : premCol
-setupTxt = trend == 0 ? "-" : (trend == 1 ? "LONG " : "SHORT ") + str.tostring(conf) + "%"
-setupCol = trend == 1 ? bullCol : trend == -1 ? bearCol : color.gray
-armed    = trend != 0 and (not needDiscount or zoneOK) and conf >= entryThreshold and validPlan
-stateTxt = trend == 0 ? "NO TREND" : not validPlan ? "INVALID" : armed ? "READY" : "WAIT"
-stateCol = armed ? bullCol : trend == 0 ? color.gray : color.new(#ffb300, 0)
+setupTxt = hasSetup ? (sDir == 1 ? "LONG " : "SHORT ") + str.tostring(conf) + "%" : "-"
+setupCol = hasSetup ? (sDir == 1 ? bullCol : bearCol) : color.gray
+mtfAlignedNow = trend == 1 ? (htf1Bull and htf2Bull) : trend == -1 ? (not htf1Bull and not htf2Bull) : false
+zoneNeed = needDiscount and not zoneOK
+waitReason = (mtfFilter and not mtfAlignedNow) ? "MTF" : zoneNeed ? (trend == 1 ? "PREMIUM" : "DISCOUNT") : conf < entryThreshold ? "LOW CONF" : "BREAK"
+stateTxt = hasSetup ? "READY" : trend == 0 ? "NO TREND" : not validPlan ? "INVALID" : "WAIT: " + waitReason
+stateCol = hasSetup ? (sDir == 1 ? bullCol : bearCol) : trend == 0 ? color.gray : not validPlan ? bearCol : color.new(#ffb300, 0)
 hd = color.new(color.black, 10)
 kb = color.new(color.black, 25)
-var table dash = table.new(position.top_right, 2, 12, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+var table dash = table.new(position.top_right, 2, 13, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
 table.cell(dash, 0, 0, "Turhal AI PRO", text_color = color.white, bgcolor = hd, text_size = size.small)
 table.cell(dash, 1, 0, "Lite", text_color = color.white, bgcolor = hd, text_size = size.small)
 table.cell(dash, 0, 1, "Trend", text_color = color.white, bgcolor = kb, text_size = size.small)
 table.cell(dash, 1, 1, f_trTxt(trend), text_color = color.white, bgcolor = color.new(f_trCol(trend), 25), text_size = size.small)
-table.cell(dash, 0, 2, "1H", text_color = color.white, bgcolor = kb, text_size = size.small)
-table.cell(dash, 1, 2, f_biasTxt(htf1Bull), text_color = color.white, bgcolor = color.new(f_biasCol(htf1Bull), 25), text_size = size.small)
-table.cell(dash, 0, 3, "4H", text_color = color.white, bgcolor = kb, text_size = size.small)
-table.cell(dash, 1, 3, f_biasTxt(htf2Bull), text_color = color.white, bgcolor = color.new(f_biasCol(htf2Bull), 25), text_size = size.small)
-table.cell(dash, 0, 4, "Zone", text_color = color.white, bgcolor = kb, text_size = size.small)
-table.cell(dash, 1, 4, zoneTxt, text_color = color.white, bgcolor = color.new(zoneCol, 25), text_size = size.small)
-table.cell(dash, 0, 5, "Signal", text_color = color.white, bgcolor = kb, text_size = size.small)
-table.cell(dash, 1, 5, str.tostring(conf) + " %", text_color = color.white, bgcolor = color.new(scCol, 20), text_size = size.small)
-table.cell(dash, 0, 6, "Setup", text_color = color.white, bgcolor = kb, text_size = size.small)
-table.cell(dash, 1, 6, setupTxt, text_color = color.white, bgcolor = color.new(setupCol, 25), text_size = size.small)
-table.cell(dash, 0, 7, "State", text_color = color.white, bgcolor = kb, text_size = size.small)
-table.cell(dash, 1, 7, stateTxt, text_color = color.white, bgcolor = color.new(stateCol, 25), text_size = size.small)
-table.cell(dash, 0, 8, "Entry", text_color = color.white, bgcolor = kb, text_size = size.tiny)
-table.cell(dash, 1, 8, f_px(validPlan ? entryP : na), text_color = color.white, bgcolor = kb, text_size = size.tiny)
-table.cell(dash, 0, 9, "SL", text_color = color.white, bgcolor = kb, text_size = size.tiny)
-table.cell(dash, 1, 9, f_px(validPlan ? slLive : na), text_color = color.white, bgcolor = color.new(bearCol, 40), text_size = size.tiny)
-table.cell(dash, 0, 10, "TP1 / TP2", text_color = color.white, bgcolor = kb, text_size = size.tiny)
-table.cell(dash, 1, 10, f_px(tp1Live) + " / " + f_px(tp2Live), text_color = color.white, bgcolor = color.new(bullCol, 40), text_size = size.tiny)
-table.cell(dash, 0, 11, "TP3", text_color = color.white, bgcolor = kb, text_size = size.tiny)
-table.cell(dash, 1, 11, f_px(tp3Live), text_color = color.white, bgcolor = color.new(bullCol, 40), text_size = size.tiny)
+table.cell(dash, 0, 2, "Bias", text_color = color.white, bgcolor = kb, text_size = size.small)
+table.cell(dash, 1, 2, biasTxt, text_color = color.white, bgcolor = color.new(biasCol, 20), text_size = size.small)
+table.cell(dash, 0, 3, "1H", text_color = color.white, bgcolor = kb, text_size = size.small)
+table.cell(dash, 1, 3, f_biasTxt(htf1Bull), text_color = color.white, bgcolor = color.new(f_biasCol(htf1Bull), 25), text_size = size.small)
+table.cell(dash, 0, 4, "4H", text_color = color.white, bgcolor = kb, text_size = size.small)
+table.cell(dash, 1, 4, f_biasTxt(htf2Bull), text_color = color.white, bgcolor = color.new(f_biasCol(htf2Bull), 25), text_size = size.small)
+table.cell(dash, 0, 5, "Zone", text_color = color.white, bgcolor = kb, text_size = size.small)
+table.cell(dash, 1, 5, zoneTxt, text_color = color.white, bgcolor = color.new(zoneCol, 25), text_size = size.small)
+table.cell(dash, 0, 6, "Signal", text_color = color.white, bgcolor = kb, text_size = size.small)
+table.cell(dash, 1, 6, str.tostring(conf) + " %", text_color = color.white, bgcolor = color.new(scCol, 20), text_size = size.small)
+table.cell(dash, 0, 7, "Setup", text_color = color.white, bgcolor = kb, text_size = size.small)
+table.cell(dash, 1, 7, setupTxt, text_color = color.white, bgcolor = color.new(setupCol, 25), text_size = size.small)
+table.cell(dash, 0, 8, "State", text_color = color.white, bgcolor = kb, text_size = size.small)
+table.cell(dash, 1, 8, stateTxt, text_color = color.white, bgcolor = color.new(stateCol, 25), text_size = size.small)
+table.cell(dash, 0, 9, "Entry", text_color = color.white, bgcolor = kb, text_size = size.tiny)
+table.cell(dash, 1, 9, f_px(hasSetup ? sEntry : na), text_color = color.white, bgcolor = kb, text_size = size.tiny)
+table.cell(dash, 0, 10, "SL", text_color = color.white, bgcolor = kb, text_size = size.tiny)
+table.cell(dash, 1, 10, f_px(hasSetup ? sSL : na), text_color = color.white, bgcolor = hasSetup ? color.new(bearCol, 40) : kb, text_size = size.tiny)
+table.cell(dash, 0, 11, "TP1 / TP2", text_color = color.white, bgcolor = kb, text_size = size.tiny)
+table.cell(dash, 1, 11, f_px(hasSetup ? sTP1 : na) + " / " + f_px(hasSetup ? sTP2 : na), text_color = color.white, bgcolor = hasSetup ? color.new(bullCol, 40) : kb, text_size = size.tiny)
+table.cell(dash, 0, 12, "TP3", text_color = color.white, bgcolor = kb, text_size = size.tiny)
+table.cell(dash, 1, 12, f_px(hasSetup ? sTP3 : na), text_color = color.white, bgcolor = hasSetup ? color.new(bullCol, 40) : kb, text_size = size.tiny)
