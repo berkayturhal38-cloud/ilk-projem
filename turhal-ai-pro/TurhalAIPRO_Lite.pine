@@ -1,17 +1,13 @@
 //@version=6
 // ============================================================================
-//  Turhal AI PRO — Lite   (flat / mobile-safe: no if/for/blocks)
-//  Non-repaint lock engine · momentum bias · WAIT reasons.
-//  SHADOW MODE: independent analytics layer that virtually takes the trades
-//  the real engine skips while in WAIT, locks a virtual plan on the confirmed
-//  bar, tracks the outcome on later bars only (no lookahead / no repaint),
-//  marks same-bar SL+TP as AMBIGUOUS, and keeps per-blocker win/total stats.
-//  It NEVER touches the real signals, entry engine or confidence.
+//  Turhal AI PRO — Lite   (flat / mobile-safe)  ·  with Shadow Mode analytics
 //  Author: berkayturhal38 | License: MPL-2.0
+//  Shadow Mode is a READ-ONLY analytics layer. It never modifies the real
+//  signals, entry engine, confidence or setup lock. Confirmed-only, no
+//  lookahead / no repaint. Outcomes are measured on later bars only.
 // ============================================================================
 indicator("Turhal AI PRO — Lite", "Turhal AI PRO Lite", overlay = true, max_lines_count = 500, max_labels_count = 500)
 
-// ---- INPUTS -----------------------------------------------------------------
 gS = "Structure"
 swingLen   = input.int(10, "Swing Length", minval = 2, maxval = 100, group = gS)
 showSwings = input.bool(true, "Show Swing HH/LL", group = gS)
@@ -48,8 +44,10 @@ rr2 = input.float(2.0, "TP2 (R)", minval = 0.1, step = 0.1, group = gE)
 rr3 = input.float(3.0, "TP3 (R)", minval = 0.1, step = 0.1, group = gE)
 
 gSh = "Shadow Mode (missed-trade analytics)"
-shadowOn   = input.bool(true, "Enable Shadow Mode", group = gSh)
-showShadow = input.bool(true, "Show Shadow Panel", group = gSh)
+shadowOn    = input.bool(true, "Enable Shadow Mode", group = gSh)
+showShadow  = input.bool(true, "Show Shadow Panel", group = gSh)
+candMinConf = input.int(40, "Shadow Min Candidate Conf (%)", minval = 0, maxval = 100, group = gSh)
+shCoolBars  = input.int(10, "Shadow Cooldown (bars)", minval = 0, group = gSh)
 
 gC = "Colors"
 bullCol  = input.color(#26a69a, "Bullish", group = gC)
@@ -58,15 +56,14 @@ swingCol = input.color(#787b86, "Swing", group = gC)
 premCol  = input.color(#ef5350, "Premium", group = gC)
 discCol  = input.color(#26a69a, "Discount", group = gC)
 
-// ---- SINGLE-LINE HELPERS ----------------------------------------------------
 f_trTxt(int t) => t == 1 ? "BULLISH" : t == -1 ? "BEARISH" : "NEUTRAL"
 f_trCol(int t) => t == 1 ? bullCol : t == -1 ? bearCol : color.gray
 f_biasTxt(bool b) => b ? "BULLISH" : "BEARISH"
 f_biasCol(bool b) => b ? bullCol : bearCol
 f_px(float v) => na(v) ? "-" : str.tostring(v, format.mintick)
 f_sh(string s) => showShadow ? s : ""
+f_wt(int w, int t) => str.tostring(w) + "/" + str.tostring(t)
 
-// ---- 1) FILTERS (ATR / Volume) ---------------------------------------------
 atrVal   = ta.atr(atrLen)
 bodySize = math.abs(close - open)
 volMA    = ta.sma(volume, volLen)
@@ -74,20 +71,17 @@ atrOK    = not useATR or (not na(atrVal) and bodySize >= atrVal * atrMult)
 volOK    = not useVol or na(volume) or (not na(volMA) and volume >= volMA * volMult)
 strong   = atrOK and volOK
 
-// ---- 2) MULTI-TIMEFRAME BIAS (non-repaint: lookahead_off) -------------------
 htf1Bull = request.security(syminfo.tickerid, htfTf1, close > ta.ema(close, emaLen), lookahead = barmerge.lookahead_off)
 htf2Bull = request.security(syminfo.tickerid, htfTf2, close > ta.ema(close, emaLen), lookahead = barmerge.lookahead_off)
 bullMTFok = not mtfFilter or (htf1Bull and htf2Bull)
 bearMTFok = not mtfFilter or (not htf1Bull and not htf2Bull)
 
-// ---- MOMENTUM BIAS (5-level; reacts to price; separate from structure) ------
 emaF = ta.ema(close, emaFastLen)
 emaS = ta.ema(close, emaSlowLen)
 bScore = (close > emaF ? 1 : -1) + (emaF > emaS ? 1 : -1) + (htf1Bull ? 1 : -1) + (htf2Bull ? 1 : -1)
 biasTxt = bScore >= 3 ? "STRONG BULL" : bScore >= 1 ? "BULLISH" : bScore <= -3 ? "STRONG BEAR" : bScore <= -1 ? "BEARISH" : "NEUTRAL"
 biasCol = bScore >= 3 ? bullCol : bScore >= 1 ? color.new(bullCol, 35) : bScore <= -3 ? bearCol : bScore <= -1 ? color.new(bearCol, 35) : color.gray
 
-// ---- 3) SWINGS (confirmed pivots; markers drawn back with offset) -----------
 ph = ta.pivothigh(swingLen, swingLen)
 pl = ta.pivotlow(swingLen, swingLen)
 var float lastPH = na
@@ -102,7 +96,6 @@ lastPLx := na(pl) ? lastPLx : bar_index - swingLen
 plotshape(showSwings and not na(ph), title = "Swing High", style = shape.triangledown, location = location.abovebar, color = swingCol, offset = -swingLen, size = size.tiny)
 plotshape(showSwings and not na(pl), title = "Swing Low",  style = shape.triangleup,   location = location.belowbar, color = swingCol, offset = -swingLen, size = size.tiny)
 
-// ---- 4) MARKET STRUCTURE: BOS / CHoCH (confirmed-only state machine) --------
 var float upLevel = na
 var bool  upBroken = false
 var float dnLevel = na
@@ -126,7 +119,6 @@ plotshape(showBreaks and bearBreak and not isChochDn, title = "BOS Down", style 
 plotshape(showBreaks and isChochUp, title = "CHoCH Up",   style = shape.diamond, location = location.belowbar, color = color.yellow, text = "CHoCH", textcolor = color.white, size = size.tiny)
 plotshape(showBreaks and isChochDn, title = "CHoCH Down", style = shape.diamond, location = location.abovebar, color = color.yellow, text = "CHoCH", textcolor = color.white, size = size.tiny)
 
-// ---- 5) PREMIUM / DISCOUNT --------------------------------------------------
 pdEq = (not na(lastPH) and not na(lastPL)) ? (lastPH + lastPL) / 2 : na
 inDiscount = not na(pdEq) and close < pdEq
 inPremium  = not na(pdEq) and close > pdEq
@@ -136,7 +128,6 @@ pLo = plot(showPD ? lastPL : na, "Range Low", color = color.new(discCol, 55), st
 fill(pHi, pEq, color = color.new(premCol, 90), title = "Premium")
 fill(pEq, pLo, color = color.new(discCol, 90), title = "Discount")
 
-// ---- 6) SINGLE CONFIDENCE (0-100) — feeds BOTH Signal and Setup ------------
 al1    = trend == 1 ? htf1Bull : trend == -1 ? not htf1Bull : false
 al2    = trend == 1 ? htf2Bull : trend == -1 ? not htf2Bull : false
 zoneOK = trend == 1 ? inDiscount : trend == -1 ? inPremium : false
@@ -146,7 +137,6 @@ cVol   = (not na(volume) and not na(volMA) and volMA > 0) ? math.min(15.0, volum
 cZone  = zoneOK ? 15.0 : 0.0
 conf   = trend == 0 ? 0 : int(math.min(100, math.round(cMTF + cDisp + cVol + cZone)))
 
-// ---- 7) LIVE PLAN CANDIDATE (used to LOCK on a signal / shadow) -------------
 planEntry = trend == 0 ? na : close
 planSL = trend == 1 ? ((na(lastPL) ? low : math.min(lastPL, low)) - (na(atrVal) ? 0.0 : atrVal * slAtrMult)) : trend == -1 ? ((na(lastPH) ? high : math.max(lastPH, high)) + (na(atrVal) ? 0.0 : atrVal * slAtrMult)) : na
 planRisk = trend == 1 ? (planEntry - planSL) : trend == -1 ? (planSL - planEntry) : na
@@ -155,13 +145,11 @@ planTP1 = not validPlan ? na : trend == 1 ? planEntry + planRisk * rr1 : planEnt
 planTP2 = not validPlan ? na : trend == 1 ? planEntry + planRisk * rr2 : planEntry - planRisk * rr2
 planTP3 = not validPlan ? na : trend == 1 ? planEntry + planRisk * rr3 : planEntry - planRisk * rr3
 
-// ---- 8) SETUP CONDITIONS + ARROWS (fire only on a fresh confirmed break) ----
 longSig  = showEntry and bullBreak and (not needDiscount or inDiscount) and conf >= entryThreshold and validPlan
 shortSig = showEntry and bearBreak and (not needDiscount or inPremium)  and conf >= entryThreshold and validPlan
 plotshape(longSig,  title = "LONG",  style = shape.labelup,   location = location.belowbar, color = bullCol, text = "LONG",  textcolor = color.white, size = size.small)
 plotshape(shortSig, title = "SHORT", style = shape.labeldown, location = location.abovebar, color = bearCol, text = "SHORT", textcolor = color.white, size = size.small)
 
-// ---- 9) LOCK / CANCEL REAL SETUP (values freeze until new setup / cancel) ---
 var int   sDir = 0
 var float sEntry = na
 var float sSL = na
@@ -180,15 +168,23 @@ sTP3   := longSig ? planTP3 : shortSig ? planTP3 : cleared ? na : sTP3
 hasSetup = sDir != 0
 
 // ============================================================================
-//  SHADOW MODE  (independent; reads real state, never writes it)
-//  Opens ONE virtual trade per trend leg while the real engine is in WAIT,
-//  tags the blocking filter, then measures the outcome on later bars only.
+//  SHADOW MODE  (read-only analytics; opens on a fresh candidate edge)
 // ============================================================================
-trendChanged = trend != trend[1]
 okBar = barstate.isconfirmed
 mtfOkDir  = trend == 1 ? (htf1Bull and htf2Bull) : trend == -1 ? (not htf1Bull and not htf2Bull) : false
 zoneOkDir = trend == 1 ? inDiscount : trend == -1 ? inPremium : false
-blockReason = (mtfFilter and not mtfOkDir) ? 1 : (needDiscount and not zoneOkDir) ? 2 : conf < entryThreshold ? 3 : 4
+failMTF   = mtfFilter and not mtfOkDir
+failZone  = needDiscount and not zoneOkDir
+failConf  = conf < entryThreshold
+failBreak = not ((trend == 1 and bullBreak) or (trend == -1 and bearBreak))
+nFail = (failMTF ? 1 : 0) + (failZone ? 1 : 0) + (failConf ? 1 : 0) + (failBreak ? 1 : 0)
+momOK = trend == 1 ? bScore >= 0 : trend == -1 ? bScore <= 0 : false
+
+// Minimum candidate criteria: a real trend, no live trade, plan valid,
+// confidence not trivially low, and momentum not opposing. Open on the
+// RISING EDGE only (a new independent opportunity), gated by a cooldown.
+candOK = shadowOn and trend != 0 and not hasSetup and not longSig and not shortSig and validPlan and conf >= candMinConf and momOK
+candEdge = candOK and not candOK[1]
 
 var int   shDir = 0
 var float shSL = na
@@ -196,10 +192,13 @@ var float shTP1 = na
 var float shTP2 = na
 var float shTP3 = na
 var int   shReached = 0
-var int   shReason = 0
-var bool  shLegUsed = false
+var int   shCool = 0
+var bool  fMTF = false
+var bool  fZone = false
+var bool  fConf = false
+var bool  fBreak = false
 
-shOpen = shadowOn and okBar and trend != 0 and not hasSetup and not longSig and not shortSig and shDir == 0 and not shLegUsed and validPlan
+shOpen = okBar and candEdge and shDir == 0 and shCool <= 0
 rNow  = shDir == 1 ? (high >= shTP3 ? 3 : high >= shTP2 ? 2 : high >= shTP1 ? 1 : 0) : shDir == -1 ? (low <= shTP3 ? 3 : low <= shTP2 ? 2 : low <= shTP1 ? 1 : 0) : 0
 slNow = shDir == 1 ? (low <= shSL) : shDir == -1 ? (high >= shSL) : false
 ambig = okBar and shDir != 0 and slNow and rNow > shReached
@@ -207,54 +206,78 @@ resolveTP3 = okBar and shDir != 0 and rNow >= 3 and not ambig
 resolveSL  = okBar and shDir != 0 and slNow and not ambig
 resolved = ambig or resolveTP3 or resolveSL
 newReached = math.max(shReached, rNow)
-win = resolveTP3 or (resolveSL and newReached >= 1)
+
+// Raw outcome classes (mutually exclusive). WIN (for Win Rate) = TP2 or TP3.
+outTP3   = resolveTP3
+outTP2SL = resolveSL and newReached == 2
+outTP1SL = resolveSL and newReached == 1
+outSL    = resolveSL and newReached == 0
+winClean = outTP3 or outTP2SL
 
 var int shTotal = 0
-var int shTP1c = 0
-var int shTP2c = 0
-var int shTP3c = 0
-var int shSLc = 0
-var int shAmbc = 0
+var int cTP3 = 0
+var int cTP2SL = 0
+var int cTP1SL = 0
+var int cSL = 0
+var int cAmb = 0
 shTotal := shTotal + (shOpen ? 1 : 0)
-shTP3c  := shTP3c + (resolveTP3 ? 1 : 0)
-shTP2c  := shTP2c + ((resolveSL and newReached == 2) ? 1 : 0)
-shTP1c  := shTP1c + ((resolveSL and newReached == 1) ? 1 : 0)
-shSLc   := shSLc + ((resolveSL and newReached == 0) ? 1 : 0)
-shAmbc  := shAmbc + (ambig ? 1 : 0)
+cTP3    := cTP3 + (outTP3 ? 1 : 0)
+cTP2SL  := cTP2SL + (outTP2SL ? 1 : 0)
+cTP1SL  := cTP1SL + (outTP1SL ? 1 : 0)
+cSL     := cSL + (outSL ? 1 : 0)
+cAmb    := cAmb + (ambig ? 1 : 0)
 
-var int rMTFt = 0
-var int rMTFw = 0
-var int rZnt = 0
-var int rZnw = 0
-var int rCnt = 0
-var int rCnw = 0
-var int rBkt = 0
-var int rBkw = 0
-rMTFt := rMTFt + ((shOpen and blockReason == 1) ? 1 : 0)
-rZnt  := rZnt + ((shOpen and blockReason == 2) ? 1 : 0)
-rCnt  := rCnt + ((shOpen and blockReason == 3) ? 1 : 0)
-rBkt  := rBkt + ((shOpen and blockReason == 4) ? 1 : 0)
-rMTFw := rMTFw + ((win and shReason == 1) ? 1 : 0)
-rZnw  := rZnw + ((win and shReason == 2) ? 1 : 0)
-rCnw  := rCnw + ((win and shReason == 3) ? 1 : 0)
-rBkw  := rBkw + ((win and shReason == 4) ? 1 : 0)
+var int mtfT = 0
+var int mtfW = 0
+var int mtfOT = 0
+var int mtfOW = 0
+var int znT = 0
+var int znW = 0
+var int znOT = 0
+var int znOW = 0
+var int cnT = 0
+var int cnW = 0
+var int cnOT = 0
+var int cnOW = 0
+var int bkT = 0
+var int bkW = 0
+var int bkOT = 0
+var int bkOW = 0
+lnFail = (fMTF ? 1 : 0) + (fZone ? 1 : 0) + (fConf ? 1 : 0) + (fBreak ? 1 : 0)
+mtfT := mtfT + ((shOpen and failMTF) ? 1 : 0)
+znT  := znT + ((shOpen and failZone) ? 1 : 0)
+cnT  := cnT + ((shOpen and failConf) ? 1 : 0)
+bkT  := bkT + ((shOpen and failBreak) ? 1 : 0)
+mtfOT := mtfOT + ((shOpen and failMTF and nFail == 1) ? 1 : 0)
+znOT  := znOT + ((shOpen and failZone and nFail == 1) ? 1 : 0)
+cnOT  := cnOT + ((shOpen and failConf and nFail == 1) ? 1 : 0)
+bkOT  := bkOT + ((shOpen and failBreak and nFail == 1) ? 1 : 0)
+mtfW := mtfW + ((winClean and fMTF) ? 1 : 0)
+znW  := znW + ((winClean and fZone) ? 1 : 0)
+cnW  := cnW + ((winClean and fConf) ? 1 : 0)
+bkW  := bkW + ((winClean and fBreak) ? 1 : 0)
+mtfOW := mtfOW + ((winClean and fMTF and lnFail == 1) ? 1 : 0)
+znOW  := znOW + ((winClean and fZone and lnFail == 1) ? 1 : 0)
+cnOW  := cnOW + ((winClean and fConf and lnFail == 1) ? 1 : 0)
+bkOW  := bkOW + ((winClean and fBreak and lnFail == 1) ? 1 : 0)
 
 shDir     := shOpen ? trend : resolved ? 0 : shDir
 shSL      := shOpen ? planSL : resolved ? na : shSL
 shTP1     := shOpen ? planTP1 : resolved ? na : shTP1
 shTP2     := shOpen ? planTP2 : resolved ? na : shTP2
 shTP3     := shOpen ? planTP3 : resolved ? na : shTP3
-shReason  := shOpen ? blockReason : resolved ? 0 : shReason
 shReached := shOpen ? 0 : resolved ? 0 : newReached
-shLegUsed := trendChanged ? false : shOpen ? true : shLegUsed
+fMTF   := shOpen ? failMTF : resolved ? false : fMTF
+fZone  := shOpen ? failZone : resolved ? false : fZone
+fConf  := shOpen ? failConf : resolved ? false : fConf
+fBreak := shOpen ? failBreak : resolved ? false : fBreak
+shCool := shOpen ? shCoolBars : math.max(0, shCool - (okBar ? 1 : 0))
 
-// ---- ALERTS -----------------------------------------------------------------
 alertcondition(longSig,  "LONG Setup",  "Turhal AI PRO Lite: high-quality LONG setup")
 alertcondition(shortSig, "SHORT Setup", "Turhal AI PRO Lite: high-quality SHORT setup")
 alertcondition(bullBreak, "Bullish BOS/CHoCH", "Turhal AI PRO Lite: bullish structure break")
 alertcondition(bearBreak, "Bearish BOS/CHoCH", "Turhal AI PRO Lite: bearish structure break")
 
-// ---- 10) MAIN DASHBOARD (unchanged layout) ---------------------------------
 scCol   = conf >= 70 ? bullCol : conf >= 40 ? color.new(#ffb300, 0) : color.gray
 zoneTxt = na(pdEq) ? "-" : inDiscount ? "DISCOUNT" : "PREMIUM"
 zoneCol = na(pdEq) ? color.gray : inDiscount ? discCol : premCol
@@ -295,31 +318,38 @@ table.cell(dash, 1, 11, f_px(hasSetup ? sTP1 : na) + " / " + f_px(hasSetup ? sTP
 table.cell(dash, 0, 12, "TP3", text_color = color.white, bgcolor = kb, text_size = size.tiny)
 table.cell(dash, 1, 12, f_px(hasSetup ? sTP3 : na), text_color = color.white, bgcolor = hasSetup ? color.new(bullCol, 40) : kb, text_size = size.tiny)
 
-// ---- SHADOW PANEL (compact, bottom-left; does not overlap main dashboard) ---
-shWins = shTP1c + shTP2c + shTP3c
-shDenom = shWins + shSLc
-shWR = shDenom > 0 ? int(math.round(shWins * 100.0 / shDenom)) : 0
+// ---- SHADOW PANEL (bottom-left; compact; win=TP2+, denom=concluded) ---------
+shDone = cTP3 + cTP2SL + cTP1SL + cSL
+shWins = cTP3 + cTP2SL
+shActive = shTotal - shDone - cAmb
+shWR = shDone > 0 ? int(math.round(shWins * 100.0 / shDone)) : 0
 shWRcol = shWR >= 55 ? bullCol : shWR >= 45 ? color.new(#ffb300, 0) : bearCol
 sb = color.new(color.black, 20)
 sk = color.new(color.black, 35)
-var table sh = table.new(position.bottom_left, 2, 10, border_width = 1, frame_color = color.new(color.gray, 55), frame_width = 1)
+var table sh = table.new(position.bottom_left, 2, 13, border_width = 1, frame_color = color.new(color.gray, 55), frame_width = 1)
 table.cell(sh, 0, 0, f_sh("SHADOW"), text_color = color.white, bgcolor = sb, text_size = size.tiny)
 table.cell(sh, 1, 0, f_sh(shadowOn ? "ON" : "OFF"), text_color = color.white, bgcolor = shadowOn ? color.new(bullCol, 30) : sk, text_size = size.tiny)
-table.cell(sh, 0, 1, f_sh("Trades"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
+table.cell(sh, 0, 1, f_sh("Opened"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
 table.cell(sh, 1, 1, f_sh(str.tostring(shTotal)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 0, 2, f_sh("Win %"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 1, 2, f_sh(str.tostring(shWR) + " %"), text_color = color.white, bgcolor = color.new(shWRcol, 25), text_size = size.tiny)
-table.cell(sh, 0, 3, f_sh("Win / Loss"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 1, 3, f_sh(str.tostring(shWins) + " / " + str.tostring(shSLc)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 0, 4, f_sh("TP1/2/3"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 1, 4, f_sh(str.tostring(shTP1c) + "/" + str.tostring(shTP2c) + "/" + str.tostring(shTP3c)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 0, 5, f_sh("SL / AMB"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 1, 5, f_sh(str.tostring(shSLc) + " / " + str.tostring(shAmbc)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 0, 6, f_sh("blk MTF"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 1, 6, f_sh(str.tostring(rMTFw) + " / " + str.tostring(rMTFt)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 0, 7, f_sh("blk ZONE"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 1, 7, f_sh(str.tostring(rZnw) + " / " + str.tostring(rZnt)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 0, 8, f_sh("blk CONF"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 1, 8, f_sh(str.tostring(rCnw) + " / " + str.tostring(rCnt)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 0, 9, f_sh("blk BREAK"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
-table.cell(sh, 1, 9, f_sh(str.tostring(rBkw) + " / " + str.tostring(rBkt)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
+table.cell(sh, 0, 2, f_sh("Concluded"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
+table.cell(sh, 1, 2, f_sh(str.tostring(shDone)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
+table.cell(sh, 0, 3, f_sh("Active/Amb"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
+table.cell(sh, 1, 3, f_sh(str.tostring(shActive) + " / " + str.tostring(cAmb)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
+table.cell(sh, 0, 4, f_sh("Win% (TP2+)"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
+table.cell(sh, 1, 4, f_sh(str.tostring(shWR) + " %"), text_color = color.white, bgcolor = color.new(shWRcol, 25), text_size = size.tiny)
+table.cell(sh, 0, 5, f_sh("TP3 / TP2>SL"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
+table.cell(sh, 1, 5, f_sh(str.tostring(cTP3) + " / " + str.tostring(cTP2SL)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
+table.cell(sh, 0, 6, f_sh("TP1>SL / SL"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
+table.cell(sh, 1, 6, f_sh(str.tostring(cTP1SL) + " / " + str.tostring(cSL)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
+table.cell(sh, 0, 7, f_sh("blk win/tot"), text_color = color.white, bgcolor = sb, text_size = size.tiny)
+table.cell(sh, 1, 7, f_sh("all - only"), text_color = color.white, bgcolor = sb, text_size = size.tiny)
+table.cell(sh, 0, 8, f_sh("MTF"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
+table.cell(sh, 1, 8, f_sh(f_wt(mtfW, mtfT) + " - " + f_wt(mtfOW, mtfOT)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
+table.cell(sh, 0, 9, f_sh("ZONE"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
+table.cell(sh, 1, 9, f_sh(f_wt(znW, znT) + " - " + f_wt(znOW, znOT)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
+table.cell(sh, 0, 10, f_sh("CONF"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
+table.cell(sh, 1, 10, f_sh(f_wt(cnW, cnT) + " - " + f_wt(cnOW, cnOT)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
+table.cell(sh, 0, 11, f_sh("BREAK"), text_color = color.white, bgcolor = sk, text_size = size.tiny)
+table.cell(sh, 1, 11, f_sh(f_wt(bkW, bkT) + " - " + f_wt(bkOW, bkOT)), text_color = color.white, bgcolor = sk, text_size = size.tiny)
+table.cell(sh, 0, 12, f_sh("win = TP2+"), text_color = color.white, bgcolor = sb, text_size = size.tiny)
+table.cell(sh, 1, 12, f_sh("amb excl."), text_color = color.white, bgcolor = sb, text_size = size.tiny)
