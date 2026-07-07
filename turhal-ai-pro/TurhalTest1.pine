@@ -2,7 +2,7 @@
 // © berkayturhal38
 //@version=6
 // ============================================================================
-//  TURHAL TEST 1  —  v1.0
+//  TURHAL TEST 1  —  v1.2
 //  AMAÇ: TradingView Strategy Tester emir motorunun (strategy.entry /
 //        strategy.exit) güvenilir çalıştığını DOĞRULAMAK. Kârlılık hedeflenmez.
 //  KURAL: Basit, repaint'siz sinyal. Tek pozisyon. Sabit SL/TP. Başka özellik YOK.
@@ -21,8 +21,8 @@ slPct = input.float(1.0, "Stop-Loss %", minval = 0.1, step = 0.1, group = gS)
 tpPct = input.float(2.0, "Take-Profit %", minval = 0.1, step = 0.1, group = gS)
 yon   = input.string("Her İkisi", "Yön", options = ["Her İkisi", "Sadece Long", "Sadece Short"], group = gS)
 
-gT = "Trend Filtresi (v1.1)"
-emaLen = input.int(200, "EMA Trend Periyodu", minval = 1, group = gT)
+gT = "Trend Filtresi (v1.2)"
+emaLen = input.int(500, "EMA Trend Periyodu", minval = 1, group = gT)
 
 gV = "Görünüm"
 showPanel = input.bool(true, "Debug Panelini Göster", group = gV)
@@ -36,7 +36,7 @@ showLines = input.bool(true, "Giriş / SL / TP Çizgilerini Göster", group = gV
 longSig  = barstate.isconfirmed and close > high[1]
 shortSig = barstate.isconfirmed and close < low[1]
 
-// v1.1 — EMA 200 trend filtresi (yalnızca giriş kapısı; sinyalin kendisi değişmez)
+// v1.2 — EMA 500 trend filtresi (yalnızca giriş kapısı; sinyalin kendisi değişmez)
 ema200 = ta.ema(close, emaLen)
 
 // ============================================================================
@@ -92,7 +92,7 @@ if strategy.position_size < 0
 // ============================================================================
 //  GRAFİK GÖRSELLERİ
 // ============================================================================
-plot(ema200, "EMA 200", color = color.new(color.orange, 0), linewidth = 2)
+plot(ema200, "EMA 500", color = color.new(color.orange, 0), linewidth = 2)
 inPos = strategy.position_size != 0
 plot(showLines and inPos ? entryPrice : na, "Giriş", color = color.new(color.gray, 0),  style = plot.style_linebr, linewidth = 1)
 plot(showLines and inPos ? slPrice    : na, "SL",    color = color.new(color.red, 0),   style = plot.style_linebr, linewidth = 2)
@@ -113,7 +113,7 @@ gap = nEntered - opened
 var table dbg = table.new(position.top_right, 2, 9, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
 if showPanel
     tc(dbg, 0, 0, "TURHAL TEST 1",       hd)
-    tc(dbg, 1, 0, "v1.0",                hd)
+    tc(dbg, 1, 0, "v1.2",                hd)
     tc(dbg, 0, 1, "Toplam LONG sinyali", kb)
     tc(dbg, 1, 1, str.tostring(nLong),   kb)
     tc(dbg, 0, 2, "Toplam SHORT sinyali", kb)
