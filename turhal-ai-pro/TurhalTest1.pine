@@ -9,7 +9,7 @@
 //  Bu dosya bağımsızdır; Lite veya diğer strategy dosyalarına dokunmaz.
 //  License: MPL-2.0
 // ============================================================================
-strategy("Turhal Test 1", "Turhal Test 1", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 100, commission_type = strategy.commission.percent, commission_value = 0.04, slippage = 1, pyramiding = 0, calc_on_every_tick = false)
+strategy("Turhal Test 1", "Turhal Test 1", overlay = true, initial_capital = 10000, default_qty_type = strategy.fixed, default_qty_value = 1, commission_type = strategy.commission.percent, commission_value = 0.04, slippage = 1, pyramiding = 0, calc_on_every_tick = false)
 // NOT: Komisyon ve slippage, TradingView'de Ayarlar > "Özellikler (Properties)"
 // sekmesinden de değiştirilebilir. strategy() içinde sabit (const) olmak zorundadır.
 
