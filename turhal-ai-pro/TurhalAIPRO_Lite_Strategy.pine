@@ -24,6 +24,7 @@ tp1Pct    = input.int(40, "TP1'de kapat (%)", minval = 1, maxval = 100, group = 
 tp2Pct    = input.int(30, "TP2'de kapat (%)", minval = 1, maxval = 100, group = gBT)
 useBE     = input.bool(true, "TP1 sonrası SL'yi girişe çek (break-even)", group = gBT)
 showMetrics = input.bool(true, "Metrik Panelini Göster", group = gBT)
+showDebug   = input.bool(true, "Debug Sayaçlarını Göster (geçici)", group = gBT)
 
 // ---- SİNYAL MOTORU GİRDİLERİ  (Lite ile birebir aynı) -----------------------
 gS = "Yapı (Structure)"
@@ -51,7 +52,7 @@ showPD = input.bool(true, "Prim/İskonto Bölgesi Göster", group = gPD)
 gE = "Giriş Motoru"
 showEntry      = input.bool(true, "Giriş Oklarını Göster", group = gE)
 entryThreshold = input.int(70, "Min Güven (%)", minval = 0, maxval = 100, group = gE)
-needDiscount   = input.bool(true, "Long İskonto / Short Prim", group = gE)
+needDiscount   = input.bool(false, "Long İskonto / Short Prim (kırılım girişinde AÇIK => 0 işlem)", group = gE)
 slAtrMult      = input.float(1.0, "SL ATR Payı", minval = 0.0, step = 0.1, group = gE)
 rr1 = input.float(1.0, "TP1 (R)", minval = 0.1, step = 0.1, group = gE)
 rr2 = input.float(2.0, "TP2 (R)", minval = 0.1, step = 0.1, group = gE)
@@ -165,6 +166,24 @@ var bool  beDone = false
 goLong  = longSig  and inDate and allowLong  and flat
 goShort = shortSig and inDate and allowShort and flat
 
+// ---- DEBUG SAYAÇLARI (geçici) — sinyalin hangi aşamada öldüğünü gösterir ----
+lZoneOK = bullBreak and (not needDiscount or inDiscount)
+sZoneOK = bearBreak and (not needDiscount or inPremium)
+var int nBull = 0
+var int nBear = 0
+var int nLZone = 0
+var int nSZone = 0
+var int nLong = 0
+var int nShort = 0
+var int nEntered = 0
+nBull    := nBull + (bullBreak ? 1 : 0)
+nBear    := nBear + (bearBreak ? 1 : 0)
+nLZone   := nLZone + (lZoneOK ? 1 : 0)
+nSZone   := nSZone + (sZoneOK ? 1 : 0)
+nLong    := nLong + (longSig ? 1 : 0)
+nShort   := nShort + (shortSig ? 1 : 0)
+nEntered := nEntered + ((goLong or goShort) ? 1 : 0)
+
 if goLong
     posEntry := close
     posSL := planSL
@@ -249,3 +268,23 @@ if showMetrics and barstate.islast
     tcm(perf, 1, 6, str.tostring(wins) + " / " + str.tostring(losses), kb)
     tcm(perf, 0, 7, "Gross K / Z", kb)
     tcm(perf, 1, 7, f_money(gp) + " / " + f_money(gl), kb)
+
+// ---- DEBUG PANELİ (geçici) --------------------------------------------------
+var table dbg = table.new(position.top_left, 2, 8, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+if showDebug and barstate.islast
+    tcm(dbg, 0, 0, "DEBUG", hd)
+    tcm(dbg, 1, 0, "sayı", hd)
+    tcm(dbg, 0, 1, "bullBreak", kb)
+    tcm(dbg, 1, 1, str.tostring(nBull), kb)
+    tcm(dbg, 0, 2, "bearBreak", kb)
+    tcm(dbg, 1, 2, str.tostring(nBear), kb)
+    tcm(dbg, 0, 3, "bull + zone", kb)
+    tcm(dbg, 1, 3, str.tostring(nLZone), kb)
+    tcm(dbg, 0, 4, "bear + zone", kb)
+    tcm(dbg, 1, 4, str.tostring(nSZone), kb)
+    tcm(dbg, 0, 5, "longSig", kb)
+    tcm(dbg, 1, 5, str.tostring(nLong), color.new(nLong > 0 ? bullCol : bearCol, 25))
+    tcm(dbg, 0, 6, "shortSig", kb)
+    tcm(dbg, 1, 6, str.tostring(nShort), color.new(nShort > 0 ? bearCol : bearCol, 25))
+    tcm(dbg, 0, 7, "girilen işlem", kb)
+    tcm(dbg, 1, 7, str.tostring(nEntered), color.new(nEntered > 0 ? bullCol : bearCol, 25))
