@@ -1,75 +1,88 @@
 //@version=6
 // ============================================================================
-//  Turhal AI PRO — Lite   (flat / mobile-safe)  ·  with Shadow Mode analytics
+//  Turhal AI PRO — Lite   ·  Gerçek sinyal motoru + READ-ONLY analiz katmanları
 //  Author: berkayturhal38 | License: MPL-2.0
-//  Shadow Mode = READ-ONLY analytics. Never modifies real signals/engine.
-//  Confirmed-only, no lookahead / no repaint. Outcomes measured on later bars.
-//  Table rows use the tc() helper so every line stays short (mobile-paste safe).
+//  Analiz katmanları (Gölge, Giriş Penceresi, Destek/Direnç, Temas) gerçek
+//  LONG/SHORT sinyallerini, confidence'i, BOS/CHoCH'u, MTF/Bölge/SL-TP'yi
+//  ASLA değiştirmez. Confirmed-only, lookahead_off, gelecek verisi yok.
+//  Aynı mumda hem SL hem TP görülürse sonuç BELİRSİZ (AMBIGUOUS) sayılır.
 // ============================================================================
 indicator("Turhal AI PRO — Lite", "Turhal AI PRO Lite", overlay = true, max_lines_count = 500, max_labels_count = 500)
 
-gS = "Structure"
+gS = "Yapı (Structure)"
 swingLen   = input.int(10, "Swing Length", minval = 2, maxval = 100, group = gS)
-showSwings = input.bool(true, "Show Swing HH/LL", group = gS)
-showBreaks = input.bool(true, "Show BOS / CHoCH", group = gS)
+showSwings = input.bool(true, "Swing HH/LL Göster", group = gS)
+showBreaks = input.bool(true, "BOS / CHoCH Göster", group = gS)
 
-gF = "Filters"
-useATR  = input.bool(true, "ATR Strong-Break Filter", group = gF)
+gF = "Filtreler"
+useATR  = input.bool(true, "ATR Güçlü Kırılım Filtresi", group = gF)
 atrLen  = input.int(14, "ATR Length", minval = 1, group = gF)
 atrMult = input.float(0.7, "Min Body / ATR", minval = 0.0, step = 0.1, group = gF)
-useVol  = input.bool(true, "Volume Filter", group = gF)
+useVol  = input.bool(true, "Hacim Filtresi", group = gF)
 volLen  = input.int(20, "Volume MA Length", minval = 1, group = gF)
 volMult = input.float(1.2, "Min Volume / MA", minval = 0.0, step = 0.1, group = gF)
 
-gM = "Multi-Timeframe"
-mtfFilter = input.bool(true, "Require MTF bias alignment", group = gM)
-htfTf1    = input.timeframe("60",  "Higher Timeframe 1", group = gM)
-htfTf2    = input.timeframe("240", "Higher Timeframe 2", group = gM)
+gM = "Çoklu Zaman (MTF)"
+mtfFilter = input.bool(true, "MTF Uyum Şartı", group = gM)
+htfTf1    = input.timeframe("60",  "Üst Zaman 1", group = gM)
+htfTf2    = input.timeframe("240", "Üst Zaman 2", group = gM)
 emaLen    = input.int(50, "HTF EMA Length", minval = 1, group = gM)
 
-gMo = "Momentum Bias"
+gMo = "Momentum"
 emaFastLen = input.int(21, "EMA Fast", minval = 1, group = gMo)
 emaSlowLen = input.int(55, "EMA Slow", minval = 1, group = gMo)
 
-gPD = "Premium / Discount"
-showPD = input.bool(true, "Show Premium/Discount zone", group = gPD)
+gPD = "Prim / İskonto"
+showPD = input.bool(true, "Prim/İskonto Bölgesi Göster", group = gPD)
 
-gE = "Entry Engine"
-showEntry      = input.bool(true, "Show Entry Arrows", group = gE)
-entryThreshold = input.int(70, "Min Confidence (%)", minval = 0, maxval = 100, group = gE)
-needDiscount   = input.bool(true, "Longs in Discount / Shorts in Premium", group = gE)
-slAtrMult      = input.float(1.0, "SL ATR Buffer", minval = 0.0, step = 0.1, group = gE)
+gE = "Giriş Motoru"
+showEntry      = input.bool(true, "Giriş Oklarını Göster", group = gE)
+entryThreshold = input.int(70, "Min Güven (%)", minval = 0, maxval = 100, group = gE)
+needDiscount   = input.bool(true, "Long İskonto / Short Prim", group = gE)
+slAtrMult      = input.float(1.0, "SL ATR Payı", minval = 0.0, step = 0.1, group = gE)
 rr1 = input.float(1.0, "TP1 (R)", minval = 0.1, step = 0.1, group = gE)
 rr2 = input.float(2.0, "TP2 (R)", minval = 0.1, step = 0.1, group = gE)
 rr3 = input.float(3.0, "TP3 (R)", minval = 0.1, step = 0.1, group = gE)
 
-gSh = "Shadow Mode (missed-trade analytics)"
-shadowOn    = input.bool(true, "Enable Shadow Mode", group = gSh)
-showShadow  = input.bool(true, "Show Shadow Panel", group = gSh)
-candMinConf = input.int(40, "Shadow Min Candidate Conf (%)", minval = 0, maxval = 100, group = gSh)
-shCoolBars  = input.int(10, "Shadow Cooldown (bars)", minval = 0, group = gSh)
+gSh = "Gölge Analizi (kaçırılan işlemler)"
+shadowOn    = input.bool(true, "Gölge Modunu Aç", group = gSh)
+showShadow  = input.bool(true, "Gölge Panelini Göster", group = gSh)
+candMinConf = input.int(40, "Gölge Min Aday Güven (%)", minval = 0, maxval = 100, group = gSh)
+shCoolBars  = input.int(10, "Gölge Cooldown (bar)", minval = 0, group = gSh)
 
-gEw = "Entry Window Shadow"
-ewOn      = input.bool(true, "Enable Entry Window Shadow", group = gEw)
-ewBars    = input.int(10, "Entry Window Bars", minval = 1, group = gEw)
-ewMinConf = input.int(40, "Entry Window Min Confidence", minval = 0, maxval = 100, group = gEw)
-showEW    = input.bool(true, "Show Entry Window Panel", group = gEw)
+gEw = "Giriş Penceresi Analizi"
+ewOn      = input.bool(true, "Giriş Penceresini Aç", group = gEw)
+ewBars    = input.int(10, "Pencere Bar Sayısı", minval = 1, group = gEw)
+ewMinConf = input.int(40, "Pencere Min Güven", minval = 0, maxval = 100, group = gEw)
+showEW    = input.bool(true, "Giriş Penceresi Panelini Göster", group = gEw)
 
-gC = "Colors"
+gSR = "Destek / Direnç Analizi"
+srOn           = input.bool(true, "S/R Analizini Aç", group = gSR)
+srTouchAtrMult = input.float(0.25, "Temas ATR Toleransı", minval = 0.01, step = 0.05, group = gSR)
+srMinGap       = input.int(3, "Minimum Temas Bar Aralığı", minval = 1, group = gSR)
+srMaxLevels    = input.int(20, "Maksimum Takip Seviye", minval = 2, maxval = 50, group = gSR)
+srNearAtr      = input.float(1.0, "BOS/CHoCH Yakınlık (ATR)", minval = 0.1, step = 0.1, group = gSR)
+srStrongMin    = input.int(3, "Güçlü Seviye Min Temas", minval = 1, group = gSR)
+showSRPanel    = input.bool(true, "Destek/Direnç Paneli", group = gSR)
+showTouchPanel = input.bool(true, "Temas Analizi Paneli", group = gSR)
+
+gC = "Renkler"
 bullCol  = input.color(#26a69a, "Bullish", group = gC)
 bearCol  = input.color(#ef5350, "Bearish", group = gC)
 swingCol = input.color(#787b86, "Swing", group = gC)
-premCol  = input.color(#ef5350, "Premium", group = gC)
-discCol  = input.color(#26a69a, "Discount", group = gC)
+premCol  = input.color(#ef5350, "Prim", group = gC)
+discCol  = input.color(#26a69a, "İskonto", group = gC)
 
-f_trTxt(int t) => t == 1 ? "BULLISH" : t == -1 ? "BEARISH" : "NEUTRAL"
+f_trTxt(int t) => t == 1 ? "YUKARI" : t == -1 ? "AŞAĞI" : "NÖTR"
 f_trCol(int t) => t == 1 ? bullCol : t == -1 ? bearCol : color.gray
-f_biasTxt(bool b) => b ? "BULLISH" : "BEARISH"
+f_biasTxt(bool b) => b ? "YUKARI" : "AŞAĞI"
 f_biasCol(bool b) => b ? bullCol : bearCol
 f_px(float v) => na(v) ? "-" : str.tostring(v, format.mintick)
 f_sh(string s) => showShadow ? s : ""
 f_ew(string s) => showEW ? s : ""
 f_wt(int w, int t) => str.tostring(w) + "/" + str.tostring(t)
+f_rate(int w, int t) => "%" + (t > 0 ? str.tostring(int(math.round(w * 100.0 / t))) : "0") + " (" + str.tostring(w) + "/" + str.tostring(t) + ")"
+f_cb(int c) => c < 50 ? 0 : c < 60 ? 1 : c < 70 ? 2 : c < 80 ? 3 : c < 90 ? 4 : 5
 tcs(table tb, int c, int r, string s, color bg) => table.cell(tb, c, r, s, text_color = color.white, bgcolor = bg, text_size = size.small)
 tct(table tb, int c, int r, string s, color bg) => table.cell(tb, c, r, s, text_color = color.white, bgcolor = bg, text_size = size.tiny)
 
@@ -88,7 +101,7 @@ bearMTFok = not mtfFilter or (not htf1Bull and not htf2Bull)
 emaF = ta.ema(close, emaFastLen)
 emaS = ta.ema(close, emaSlowLen)
 bScore = (close > emaF ? 1 : -1) + (emaF > emaS ? 1 : -1) + (htf1Bull ? 1 : -1) + (htf2Bull ? 1 : -1)
-biasTxt = bScore >= 3 ? "STRONG BULL" : bScore >= 1 ? "BULLISH" : bScore <= -3 ? "STRONG BEAR" : bScore <= -1 ? "BEARISH" : "NEUTRAL"
+biasTxt = bScore >= 3 ? "GÜÇLÜ YUKARI" : bScore >= 1 ? "YUKARI" : bScore <= -3 ? "GÜÇLÜ AŞAĞI" : bScore <= -1 ? "AŞAĞI" : "NÖTR"
 biasCol = bScore >= 3 ? bullCol : bScore >= 1 ? color.new(bullCol, 35) : bScore <= -3 ? bearCol : bScore <= -1 ? color.new(bearCol, 35) : color.gray
 
 ph = ta.pivothigh(swingLen, swingLen)
@@ -134,8 +147,8 @@ inPremium  = not na(pdEq) and close > pdEq
 pHi = plot(showPD ? lastPH : na, "Range High", color = color.new(premCol, 55), style = plot.style_linebr)
 pEq = plot(showPD ? pdEq   : na, "Equilibrium", color = color.new(color.gray, 30), style = plot.style_linebr)
 pLo = plot(showPD ? lastPL : na, "Range Low", color = color.new(discCol, 55), style = plot.style_linebr)
-fill(pHi, pEq, color = color.new(premCol, 90), title = "Premium")
-fill(pEq, pLo, color = color.new(discCol, 90), title = "Discount")
+fill(pHi, pEq, color = color.new(premCol, 90), title = "Prim")
+fill(pEq, pLo, color = color.new(discCol, 90), title = "İskonto")
 
 al1    = trend == 1 ? htf1Bull : trend == -1 ? not htf1Bull : false
 al2    = trend == 1 ? htf2Bull : trend == -1 ? not htf2Bull : false
@@ -177,7 +190,7 @@ sTP3   := longSig ? planTP3 : shortSig ? planTP3 : cleared ? na : sTP3
 hasSetup = sDir != 0
 
 // ============================================================================
-//  SHADOW MODE  (read-only analytics; opens on a fresh candidate edge)
+//  GÖLGE MODU  (read-only; aday kenarında açılır)
 // ============================================================================
 okBar = barstate.isconfirmed
 mtfOkDir  = trend == 1 ? (htf1Bull and htf2Bull) : trend == -1 ? (not htf1Bull and not htf2Bull) : false
@@ -278,10 +291,7 @@ fBreak := shOpen ? failBreak : resolved ? false : fBreak
 shCool := shOpen ? shCoolBars : math.max(0, shCool - (okBar ? 1 : 0))
 
 // ============================================================================
-//  ENTRY WINDOW SHADOW  (read-only; entries in the N bars AFTER a break)
-//  Hypothesis: quality setups often appear a few bars after BOS/CHoCH, which
-//  the real engine (break-bar-only entry) misses. NEVER enters on the break
-//  bar. One virtual trade per window. Confirmed-only, no lookahead/repaint.
+//  GİRİŞ PENCERESİ  (read-only; kırılımdan sonraki N barda giriş)  + gecikme kovaları
 // ============================================================================
 brkBar = bullBreak or bearBreak
 ewNewWin = ewOn and okBar and brkBar
@@ -294,6 +304,7 @@ var float ewTP1 = na
 var float ewTP2 = na
 var float ewTP3 = na
 var int   ewReached = 0
+var int   ewdB = 0
 
 ewWinOpenNow = ewWinDir != 0 and ewWinLeft > 0
 ewDelayNow = ewBars - ewWinLeft + 1
@@ -326,30 +337,214 @@ ewCSL   := ewCSL + (ewOutSL ? 1 : 0)
 ewCAmb  := ewCAmb + (ewAmbig ? 1 : 0)
 ewDelaySum := ewDelaySum + (ewQual ? ewDelayNow : 0)
 
+// gecikme kovaları: 1,2,3,4,5,6-10  (index 0..5)
+var int[] ewdTot = array.new_int(6, 0)
+var int[] ewdWin = array.new_int(6, 0)
+var int[] ewdSL  = array.new_int(6, 0)
+if ewResolved
+    array.set(ewdTot, ewdB, array.get(ewdTot, ewdB) + 1)
+    if ewOutTP3 or ewOutTP2SL
+        array.set(ewdWin, ewdB, array.get(ewdWin, ewdB) + 1)
+    if ewOutSL
+        array.set(ewdSL, ewdB, array.get(ewdSL, ewdB) + 1)
+
 ewDir     := ewQual ? ewWinDir : ewResolved ? 0 : ewDir
 ewSL      := ewQual ? planSL : ewResolved ? na : ewSL
 ewTP1     := ewQual ? planTP1 : ewResolved ? na : ewTP1
 ewTP2     := ewQual ? planTP2 : ewResolved ? na : ewTP2
 ewTP3     := ewQual ? planTP3 : ewResolved ? na : ewTP3
 ewReached := ewQual ? 0 : ewResolved ? 0 : ewNewReached
+ewdB      := ewQual ? (ewDelayNow <= 5 ? ewDelayNow - 1 : 5) : ewResolved ? 0 : ewdB
 ewWinUsed := ewNewWin ? false : ewQual ? true : ewWinUsed
 ewWinDir  := ewNewWin ? (bullBreak ? 1 : -1) : (okBar and ewWinLeft <= 1 ? 0 : ewWinDir)
 ewWinLeft := ewNewWin ? ewBars : (okBar ? math.max(0, ewWinLeft - 1) : ewWinLeft)
 
-alertcondition(longSig,  "LONG Setup",  "Turhal AI PRO Lite: high-quality LONG setup")
-alertcondition(shortSig, "SHORT Setup", "Turhal AI PRO Lite: high-quality SHORT setup")
-alertcondition(bullBreak, "Bullish BOS/CHoCH", "Turhal AI PRO Lite: bullish structure break")
-alertcondition(bearBreak, "Bearish BOS/CHoCH", "Turhal AI PRO Lite: bearish structure break")
+// ============================================================================
+//  DESTEK / DİRENÇ ANALİZİ  (READ-ONLY, çok seviyeli, non-repaint)
+// ============================================================================
+type SR
+    float price
+    int   dir
+    int   born
+    int   touches
+    int   rejects
+    int   broke
+    int   tab
+    int   lastT
+    bool  active
 
+var array<SR> srArr = array.new<SR>()
+
+if srOn and barstate.isconfirmed and not na(ph)
+    array.push(srArr, SR.new(ph, 1, bar_index, 0, 0, 0, 0, bar_index, true))
+    if array.size(srArr) > srMaxLevels
+        array.shift(srArr)
+if srOn and barstate.isconfirmed and not na(pl)
+    array.push(srArr, SR.new(pl, -1, bar_index, 0, 0, 0, 0, bar_index, true))
+    if array.size(srArr) > srMaxLevels
+        array.shift(srArr)
+
+srTol = na(atrVal) ? 0.0 : atrVal * srTouchAtrMult
+
+// temas / ret / kırılma + son temasın verileri
+newTouchDir   = 0
+newTouchBucket = 0
+float newTouchLevel = na
+float newTouchStart = na
+if srOn and barstate.isconfirmed and array.size(srArr) > 0
+    for i = 0 to array.size(srArr) - 1
+        L = array.get(srArr, i)
+        if L.active
+            near = high >= L.price - srTol and low <= L.price + srTol
+            gapOK = (bar_index - L.lastT) >= srMinGap
+            brokeNow = L.dir == 1 ? close > L.price + srTol : close < L.price - srTol
+            rejectNow = near and (L.dir == 1 ? close < L.price : close > L.price)
+            if near and gapOK and not brokeNow
+                L.touches := L.touches + 1
+                L.lastT := bar_index
+                if rejectNow
+                    L.rejects := L.rejects + 1
+                newTouchDir := L.dir == 1 ? -1 : 1
+                newTouchBucket := math.min(5, L.touches)
+                newTouchLevel := L.price
+                newTouchStart := close
+            if brokeNow
+                L.broke := 1
+                L.tab := L.touches
+                L.lastT := bar_index
+                L.active := false
+
+// TEMAS SONRASI HAREKET  (tek global izleyici, temas-sayısı kovalarına yazar)
+var int   tkDir = 0
+var float tkStart = na
+var float tkPrice = na
+var float tkAtr = na
+var int   tkReached = 0
+var int   tkBucket = 0
+startTk = srOn and barstate.isconfirmed and tkDir == 0 and newTouchDir != 0
+tkReachNow = tkDir == 1 ? (high >= tkStart + 3 * tkAtr ? 3 : high >= tkStart + 2 * tkAtr ? 2 : high >= tkStart + tkAtr ? 1 : 0) : tkDir == -1 ? (low <= tkStart - 3 * tkAtr ? 3 : low <= tkStart - 2 * tkAtr ? 2 : low <= tkStart - tkAtr ? 1 : 0) : 0
+tkBrokeLvl = tkDir == 1 ? (low < tkPrice - srTol) : tkDir == -1 ? (high > tkPrice + srTol) : false
+tkNewReached = math.max(tkReached, tkReachNow)
+tkAmbig = okBar and tkDir != 0 and tkBrokeLvl and tkReachNow > tkReached
+tkResMove = okBar and tkDir != 0 and tkNewReached >= 3 and not tkAmbig
+tkResBrk  = okBar and tkDir != 0 and tkBrokeLvl and not tkAmbig
+tkResolved = tkAmbig or tkResMove or tkResBrk
+
+var int[] tkTot = array.new_int(6, 0)
+var int[] tkRej = array.new_int(6, 0)
+var int[] tkBrk = array.new_int(6, 0)
+var int[] tkAmb = array.new_int(6, 0)
+var int   tkMoveSum = 0
+var int   tkMoveN = 0
+if tkResolved
+    array.set(tkTot, tkBucket, array.get(tkTot, tkBucket) + 1)
+    if tkResMove
+        array.set(tkRej, tkBucket, array.get(tkRej, tkBucket) + 1)
+    if tkResBrk
+        array.set(tkBrk, tkBucket, array.get(tkBrk, tkBucket) + 1)
+    if tkAmbig
+        array.set(tkAmb, tkBucket, array.get(tkAmb, tkBucket) + 1)
+    tkMoveSum := tkMoveSum + tkNewReached
+    tkMoveN := tkMoveN + 1
+
+tkDir     := startTk ? newTouchDir : tkResolved ? 0 : tkDir
+tkStart   := startTk ? newTouchStart : tkResolved ? na : tkStart
+tkPrice   := startTk ? newTouchLevel : tkResolved ? na : tkPrice
+tkAtr     := startTk ? atrVal : tkResolved ? na : tkAtr
+tkBucket  := startTk ? newTouchBucket : tkResolved ? 0 : tkBucket
+tkReached := startTk ? 0 : tkResolved ? 0 : tkNewReached
+
+// ============================================================================
+//  BOS/CHoCH + S/R + GÜVEN KOVALARI  (kırılım başına tek sanal işlem, read-only)
+// ============================================================================
+brkNear = false
+brkDirLvl = 0
+brkStrong = false
+if srOn and (bullBreak or bearBreak) and array.size(srArr) > 0
+    float bestD = na
+    for i = 0 to array.size(srArr) - 1
+        L = array.get(srArr, i)
+        if L.active
+            d = math.abs(L.price - close)
+            if d <= srNearAtr * (na(atrVal) ? 0.0 : atrVal) and (na(bestD) or d < bestD)
+                bestD := d
+                brkNear := true
+                brkDirLvl := L.dir
+                brkStrong := L.touches >= srStrongMin
+isCh = isChochUp or isChochDn
+catIdx = not brkNear ? (isCh ? 5 : 4) : brkDirLvl == -1 ? (isCh ? 2 : 0) : (isCh ? 3 : 1)
+
+var int   btDir = 0
+var float btSL = na
+var float btTP1 = na
+var float btTP2 = na
+var float btTP3 = na
+var int   btReached = 0
+var int   btCat = 0
+var int   btCB = 0
+btOpen = srOn and (bullBreak or bearBreak) and validPlan and btDir == 0
+btRNow = btDir == 1 ? (high >= btTP3 ? 3 : high >= btTP2 ? 2 : high >= btTP1 ? 1 : 0) : btDir == -1 ? (low <= btTP3 ? 3 : low <= btTP2 ? 2 : low <= btTP1 ? 1 : 0) : 0
+btSlNow = btDir == 1 ? (low <= btSL) : btDir == -1 ? (high >= btSL) : false
+btAmbig = okBar and btDir != 0 and btSlNow and btRNow > btReached
+btResTP3 = okBar and btDir != 0 and btRNow >= 3 and not btAmbig
+btResSL  = okBar and btDir != 0 and btSlNow and not btAmbig
+btResolved = btAmbig or btResTP3 or btResSL
+btNewReached = math.max(btReached, btRNow)
+btWin = btResTP3 or (btResSL and btNewReached == 2)
+
+var int[] catTot = array.new_int(6, 0)
+var int[] catWin = array.new_int(6, 0)
+var int[] catSL  = array.new_int(6, 0)
+var int[] cbTot = array.new_int(6, 0)
+var int[] cb3   = array.new_int(6, 0)
+var int[] cb2   = array.new_int(6, 0)
+var int[] cb1   = array.new_int(6, 0)
+var int[] cbSLa = array.new_int(6, 0)
+var int[] cbAmb = array.new_int(6, 0)
+if btResolved
+    array.set(catTot, btCat, array.get(catTot, btCat) + 1)
+    if btWin
+        array.set(catWin, btCat, array.get(catWin, btCat) + 1)
+    if btResSL and btNewReached == 0
+        array.set(catSL, btCat, array.get(catSL, btCat) + 1)
+    array.set(cbTot, btCB, array.get(cbTot, btCB) + 1)
+    if btResTP3
+        array.set(cb3, btCB, array.get(cb3, btCB) + 1)
+    if btResSL and btNewReached == 2
+        array.set(cb2, btCB, array.get(cb2, btCB) + 1)
+    if btResSL and btNewReached == 1
+        array.set(cb1, btCB, array.get(cb1, btCB) + 1)
+    if btResSL and btNewReached == 0
+        array.set(cbSLa, btCB, array.get(cbSLa, btCB) + 1)
+    if btAmbig
+        array.set(cbAmb, btCB, array.get(cbAmb, btCB) + 1)
+
+btDir     := btOpen ? (bullBreak ? 1 : -1) : btResolved ? 0 : btDir
+btSL      := btOpen ? planSL : btResolved ? na : btSL
+btTP1     := btOpen ? planTP1 : btResolved ? na : btTP1
+btTP2     := btOpen ? planTP2 : btResolved ? na : btTP2
+btTP3     := btOpen ? planTP3 : btResolved ? na : btTP3
+btReached := btOpen ? 0 : btResolved ? 0 : btNewReached
+btCat     := btOpen ? catIdx : btResolved ? 0 : btCat
+btCB      := btOpen ? f_cb(conf) : btResolved ? 0 : btCB
+
+alertcondition(longSig,  "LONG Setup",  "Turhal AI PRO Lite: yüksek kaliteli LONG")
+alertcondition(shortSig, "SHORT Setup", "Turhal AI PRO Lite: yüksek kaliteli SHORT")
+alertcondition(bullBreak, "Bullish BOS/CHoCH", "Turhal AI PRO Lite: boğa yapı kırılımı")
+alertcondition(bearBreak, "Bearish BOS/CHoCH", "Turhal AI PRO Lite: ayı yapı kırılımı")
+
+// ============================================================================
+//  ANA PANEL
+// ============================================================================
 scCol   = conf >= 70 ? bullCol : conf >= 40 ? color.new(#ffb300, 0) : color.gray
-zoneTxt = na(pdEq) ? "-" : inDiscount ? "DISCOUNT" : "PREMIUM"
+zoneTxt = na(pdEq) ? "-" : inDiscount ? "İSKONTO" : "PRİM"
 zoneCol = na(pdEq) ? color.gray : inDiscount ? discCol : premCol
 setupTxt = hasSetup ? (sDir == 1 ? "LONG " : "SHORT ") + str.tostring(conf) + "%" : "-"
 setupCol = hasSetup ? (sDir == 1 ? bullCol : bearCol) : color.gray
 mtfAlignedNow = trend == 1 ? (htf1Bull and htf2Bull) : trend == -1 ? (not htf1Bull and not htf2Bull) : false
 zoneNeed = needDiscount and not zoneOK
-waitReason = (mtfFilter and not mtfAlignedNow) ? "MTF" : zoneNeed ? (trend == 1 ? "PREMIUM" : "DISCOUNT") : conf < entryThreshold ? "LOW CONF" : "BREAK"
-stateTxt = hasSetup ? "READY" : trend == 0 ? "NO TREND" : not validPlan ? "INVALID" : "WAIT: " + waitReason
+waitReason = (mtfFilter and not mtfAlignedNow) ? "MTF" : zoneNeed ? (trend == 1 ? "PRİM" : "İSKONTO") : conf < entryThreshold ? "DÜŞÜK GÜVEN" : "KIRILIM"
+stateTxt = hasSetup ? "HAZIR" : trend == 0 ? "TREND YOK" : not validPlan ? "GEÇERSİZ" : "BEKLE: " + waitReason
 stateCol = hasSetup ? (sDir == 1 ? bullCol : bearCol) : trend == 0 ? color.gray : not validPlan ? bearCol : color.new(#ffb300, 0)
 hd = color.new(color.black, 10)
 kb = color.new(color.black, 25)
@@ -375,21 +570,21 @@ tcs(dash, 0, 0, "Turhal AI PRO", hd)
 tcs(dash, 1, 0, "Lite", hd)
 tcs(dash, 0, 1, "Trend", kb)
 tcs(dash, 1, 1, f_trTxt(trend), trCol)
-tcs(dash, 0, 2, "Bias", kb)
+tcs(dash, 0, 2, "Momentum", kb)
 tcs(dash, 1, 2, biasTxt, biCol)
 tcs(dash, 0, 3, "1H", kb)
 tcs(dash, 1, 3, f_biasTxt(htf1Bull), h1Col)
 tcs(dash, 0, 4, "4H", kb)
 tcs(dash, 1, 4, f_biasTxt(htf2Bull), h2Col)
-tcs(dash, 0, 5, "Zone", kb)
+tcs(dash, 0, 5, "Bölge", kb)
 tcs(dash, 1, 5, zoneTxt, zCol)
-tcs(dash, 0, 6, "Signal", kb)
+tcs(dash, 0, 6, "Sinyal", kb)
 tcs(dash, 1, 6, dSignal, sgCol)
-tcs(dash, 0, 7, "Setup", kb)
+tcs(dash, 0, 7, "Kurulum", kb)
 tcs(dash, 1, 7, setupTxt, stpCol)
-tcs(dash, 0, 8, "State", kb)
+tcs(dash, 0, 8, "Durum", kb)
 tcs(dash, 1, 8, stateTxt, stCol)
-tct(dash, 0, 9, "Entry", kb)
+tct(dash, 0, 9, "Giriş", kb)
 tct(dash, 1, 9, dEntry, kb)
 tct(dash, 0, 10, "SL", kb)
 tct(dash, 1, 10, dSL, slCol)
@@ -398,6 +593,9 @@ tct(dash, 1, 11, dTp12, tpCol)
 tct(dash, 0, 12, "TP3", kb)
 tct(dash, 1, 12, dTp3, tpCol)
 
+// ============================================================================
+//  GÖLGE ANALİZİ PANELİ  (+ güven kovaları)
+// ============================================================================
 shDone = cTP3 + cTP2SL + cTP1SL + cSL
 shWins = cTP3 + cTP2SL
 shActive = shTotal - shDone - cAmb
@@ -415,34 +613,52 @@ tMtf = f_wt(mtfW, mtfT) + " - " + f_wt(mtfOW, mtfOT)
 tZn = f_wt(znW, znT) + " - " + f_wt(znOW, znOT)
 tCn = f_wt(cnW, cnT) + " - " + f_wt(cnOW, cnOT)
 tBk = f_wt(bkW, bkT) + " - " + f_wt(bkOW, bkOT)
-var table sh = table.new(position.bottom_left, 2, 13, border_width = 1, frame_color = color.new(color.gray, 55), frame_width = 1)
-tct(sh, 0, 0, f_sh("SHADOW"), sb)
-tct(sh, 1, 0, f_sh(shadowOn ? "ON" : "OFF"), onCol)
-tct(sh, 0, 1, f_sh("Opened"), sk)
+var table sh = table.new(position.bottom_left, 2, 20, border_width = 1, frame_color = color.new(color.gray, 55), frame_width = 1)
+tct(sh, 0, 0, f_sh("GÖLGE ANALİZİ"), sb)
+tct(sh, 1, 0, f_sh(shadowOn ? "AÇIK" : "KAPALI"), onCol)
+tct(sh, 0, 1, f_sh("Açılan"), sk)
 tct(sh, 1, 1, f_sh(str.tostring(shTotal)), sk)
-tct(sh, 0, 2, f_sh("Concluded"), sk)
+tct(sh, 0, 2, f_sh("Sonuçlanan"), sk)
 tct(sh, 1, 2, f_sh(str.tostring(shDone)), sk)
-tct(sh, 0, 3, f_sh("Active/Amb"), sk)
+tct(sh, 0, 3, f_sh("Açık/Belirsiz"), sk)
 tct(sh, 1, 3, f_sh(tActAmb), sk)
-tct(sh, 0, 4, f_sh("Win% TP2+"), sk)
+tct(sh, 0, 4, f_sh("Başarı TP2+"), sk)
 tct(sh, 1, 4, f_sh(shWRt), wrCol)
 tct(sh, 0, 5, f_sh("TP3 / TP2>SL"), sk)
 tct(sh, 1, 5, f_sh(tTp32), sk)
 tct(sh, 0, 6, f_sh("TP1>SL / SL"), sk)
 tct(sh, 1, 6, f_sh(tTp1sl), sk)
-tct(sh, 0, 7, f_sh("blk w/t"), sb)
-tct(sh, 1, 7, f_sh("all-only"), sb)
+tct(sh, 0, 7, f_sh("engel k/t"), sb)
+tct(sh, 1, 7, f_sh("hepsi-tek"), sb)
 tct(sh, 0, 8, f_sh("MTF"), sk)
 tct(sh, 1, 8, f_sh(tMtf), sk)
-tct(sh, 0, 9, f_sh("ZONE"), sk)
+tct(sh, 0, 9, f_sh("BÖLGE"), sk)
 tct(sh, 1, 9, f_sh(tZn), sk)
-tct(sh, 0, 10, f_sh("CONF"), sk)
+tct(sh, 0, 10, f_sh("GÜVEN"), sk)
 tct(sh, 1, 10, f_sh(tCn), sk)
-tct(sh, 0, 11, f_sh("BREAK"), sk)
+tct(sh, 0, 11, f_sh("KIRILIM"), sk)
 tct(sh, 1, 11, f_sh(tBk), sk)
-tct(sh, 0, 12, f_sh("win=TP2+"), sb)
-tct(sh, 1, 12, f_sh("amb excl"), sb)
+tct(sh, 0, 12, f_sh("GÜVEN KOVA"), sb)
+tct(sh, 1, 12, f_sh("TP2+ oran"), sb)
+if barstate.islast
+    tct(sh, 0, 13, f_sh("40-49"), sk)
+    tct(sh, 1, 13, f_sh(f_rate(array.get(cb3, 0) + array.get(cb2, 0), array.get(cbTot, 0))), sk)
+    tct(sh, 0, 14, f_sh("50-59"), sk)
+    tct(sh, 1, 14, f_sh(f_rate(array.get(cb3, 1) + array.get(cb2, 1), array.get(cbTot, 1))), sk)
+    tct(sh, 0, 15, f_sh("60-69"), sk)
+    tct(sh, 1, 15, f_sh(f_rate(array.get(cb3, 2) + array.get(cb2, 2), array.get(cbTot, 2))), sk)
+    tct(sh, 0, 16, f_sh("70-79"), sk)
+    tct(sh, 1, 16, f_sh(f_rate(array.get(cb3, 3) + array.get(cb2, 3), array.get(cbTot, 3))), sk)
+    tct(sh, 0, 17, f_sh("80-89"), sk)
+    tct(sh, 1, 17, f_sh(f_rate(array.get(cb3, 4) + array.get(cb2, 4), array.get(cbTot, 4))), sk)
+    tct(sh, 0, 18, f_sh("90-100"), sk)
+    tct(sh, 1, 18, f_sh(f_rate(array.get(cb3, 5) + array.get(cb2, 5), array.get(cbTot, 5))), sk)
+    tct(sh, 0, 19, f_sh("başarı = TP2+"), sb)
+    tct(sh, 1, 19, f_sh("belirsiz hariç"), sb)
 
+// ============================================================================
+//  GİRİŞ PENCERESİ PANELİ  (+ gecikme kovaları)
+// ============================================================================
 ewDone = ewC3 + ewC2 + ewC1 + ewCSL
 ewWins = ewC3 + ewC2
 ewWR = ewDone > 0 ? int(math.round(ewWins * 100.0 / ewDone)) : 0
@@ -453,20 +669,114 @@ eTp32 = str.tostring(ewC3) + " / " + str.tostring(ewC2)
 eTp1sl = str.tostring(ewC1) + " / " + str.tostring(ewCSL)
 ewWRt = str.tostring(ewWR) + " %"
 ewAvgt = str.tostring(ewAvgD) + " bar"
-var table ewt = table.new(position.top_left, 2, 8, border_width = 1, frame_color = color.new(color.gray, 55), frame_width = 1)
-tct(ewt, 0, 0, f_ew("ENTRY WIN"), sb)
-tct(ewt, 1, 0, f_ew(ewOn ? "ON" : "OFF"), ewOnCol)
-tct(ewt, 0, 1, f_ew("Opened"), sk)
+var table ewt = table.new(position.top_left, 2, 15, border_width = 1, frame_color = color.new(color.gray, 55), frame_width = 1)
+tct(ewt, 0, 0, f_ew("GİRİŞ PENCERESİ"), sb)
+tct(ewt, 1, 0, f_ew(ewOn ? "AÇIK" : "KAPALI"), ewOnCol)
+tct(ewt, 0, 1, f_ew("Açılan"), sk)
 tct(ewt, 1, 1, f_ew(str.tostring(ewTotal)), sk)
-tct(ewt, 0, 2, f_ew("Concluded"), sk)
+tct(ewt, 0, 2, f_ew("Sonuçlanan"), sk)
 tct(ewt, 1, 2, f_ew(str.tostring(ewDone)), sk)
-tct(ewt, 0, 3, f_ew("Win% TP2+"), sk)
+tct(ewt, 0, 3, f_ew("Başarı TP2+"), sk)
 tct(ewt, 1, 3, f_ew(ewWRt), ewWRcol)
 tct(ewt, 0, 4, f_ew("TP3 / TP2>SL"), sk)
 tct(ewt, 1, 4, f_ew(eTp32), sk)
 tct(ewt, 0, 5, f_ew("TP1>SL / SL"), sk)
 tct(ewt, 1, 5, f_ew(eTp1sl), sk)
-tct(ewt, 0, 6, f_ew("Amb"), sk)
+tct(ewt, 0, 6, f_ew("Belirsiz"), sk)
 tct(ewt, 1, 6, f_ew(str.tostring(ewCAmb)), sk)
-tct(ewt, 0, 7, f_ew("Avg delay"), sk)
+tct(ewt, 0, 7, f_ew("Ort. gecikme"), sk)
 tct(ewt, 1, 7, f_ew(ewAvgt), sk)
+tct(ewt, 0, 8, f_ew("GECİKME KOVA"), sb)
+tct(ewt, 1, 8, f_ew("TP2+ oran"), sb)
+if barstate.islast
+    tct(ewt, 0, 9, f_ew("1 bar"), sk)
+    tct(ewt, 1, 9, f_ew(f_rate(array.get(ewdWin, 0), array.get(ewdTot, 0))), sk)
+    tct(ewt, 0, 10, f_ew("2 bar"), sk)
+    tct(ewt, 1, 10, f_ew(f_rate(array.get(ewdWin, 1), array.get(ewdTot, 1))), sk)
+    tct(ewt, 0, 11, f_ew("3 bar"), sk)
+    tct(ewt, 1, 11, f_ew(f_rate(array.get(ewdWin, 2), array.get(ewdTot, 2))), sk)
+    tct(ewt, 0, 12, f_ew("4 bar"), sk)
+    tct(ewt, 1, 12, f_ew(f_rate(array.get(ewdWin, 3), array.get(ewdTot, 3))), sk)
+    tct(ewt, 0, 13, f_ew("5 bar"), sk)
+    tct(ewt, 1, 13, f_ew(f_rate(array.get(ewdWin, 4), array.get(ewdTot, 4))), sk)
+    tct(ewt, 0, 14, f_ew("6-10 bar"), sk)
+    tct(ewt, 1, 14, f_ew(f_rate(array.get(ewdWin, 5), array.get(ewdTot, 5))), sk)
+
+// ============================================================================
+//  DESTEK / DİRENÇ PANELİ  (+ BOS/CHoCH kategorileri)
+// ============================================================================
+var table srT = table.new(position.bottom_right, 2, 15, border_width = 1, frame_color = color.new(color.gray, 55), frame_width = 1)
+if showSRPanel and barstate.islast
+    float supP = na
+    float resP = na
+    sumT = 0
+    sumR = 0
+    sumB = 0
+    supTouch = 0
+    resTouch = 0
+    if array.size(srArr) > 0
+        for i = 0 to array.size(srArr) - 1
+            L = array.get(srArr, i)
+            sumT += L.touches
+            sumR += L.rejects
+            sumB += L.broke
+            if L.active and L.dir == -1 and L.price < close and (na(supP) or L.price > supP)
+                supP := L.price
+                supTouch := L.touches
+            if L.active and L.dir == 1 and L.price > close and (na(resP) or L.price < resP)
+                resP := L.price
+                resTouch := L.touches
+    avgMove = tkMoveN > 0 ? str.tostring(math.round(tkMoveSum * 10.0 / tkMoveN) / 10.0) + " ATR" : "-"
+    powTxt = f_rate(sumR, sumT)
+    tct(srT, 0, 0, "DESTEK/DİRENÇ", sb)
+    tct(srT, 1, 0, srOn ? "AÇIK" : "KAPALI", srOn ? color.new(bullCol, 30) : sk)
+    tct(srT, 0, 1, "Aktif Destek", sk)
+    tct(srT, 1, 1, f_px(supP), color.new(discCol, 40))
+    tct(srT, 0, 2, "Aktif Direnç", sk)
+    tct(srT, 1, 2, f_px(resP), color.new(premCol, 40))
+    tct(srT, 0, 3, "Destek Temas", sk)
+    tct(srT, 1, 3, str.tostring(supTouch), sk)
+    tct(srT, 0, 4, "Direnç Temas", sk)
+    tct(srT, 1, 4, str.tostring(resTouch), sk)
+    tct(srT, 0, 5, "Başarılı Ret", sk)
+    tct(srT, 1, 5, str.tostring(sumR), sk)
+    tct(srT, 0, 6, "Kırılma", sk)
+    tct(srT, 1, 6, str.tostring(sumB), sk)
+    tct(srT, 0, 7, "Ort. Hareket", sk)
+    tct(srT, 1, 7, avgMove, sk)
+    tct(srT, 0, 8, "Güç (ret/temas)", sk)
+    tct(srT, 1, 8, powTxt, sk)
+    tct(srT, 0, 9, "KIRILIM+S/R", sb)
+    tct(srT, 1, 9, "TP2+ oran", sb)
+    tct(srT, 0, 10, "BOS+Destek", sk)
+    tct(srT, 1, 10, f_rate(array.get(catWin, 0), array.get(catTot, 0)), sk)
+    tct(srT, 0, 11, "BOS+Direnç", sk)
+    tct(srT, 1, 11, f_rate(array.get(catWin, 1), array.get(catTot, 1)), sk)
+    tct(srT, 0, 12, "CHoCH+Destek", sk)
+    tct(srT, 1, 12, f_rate(array.get(catWin, 2), array.get(catTot, 2)), sk)
+    tct(srT, 0, 13, "CHoCH+Direnç", sk)
+    tct(srT, 1, 13, f_rate(array.get(catWin, 3), array.get(catTot, 3)), sk)
+    tct(srT, 0, 14, "S/R yok (BOS/CH)", sk)
+    tct(srT, 1, 14, f_rate(array.get(catWin, 4) + array.get(catWin, 5), array.get(catTot, 4) + array.get(catTot, 5)), sk)
+
+// ============================================================================
+//  TEMAS ANALİZİ PANELİ  (temas sayısına göre başarı)
+// ============================================================================
+var table tkT = table.new(position.middle_right, 2, 8, border_width = 1, frame_color = color.new(color.gray, 55), frame_width = 1)
+if showTouchPanel and barstate.islast
+    tct(tkT, 0, 0, "TEMAS ANALİZİ", sb)
+    tct(tkT, 1, 0, "ret/toplam", sb)
+    tct(tkT, 0, 1, "1.Temas", sk)
+    tct(tkT, 1, 1, f_rate(array.get(tkRej, 1), array.get(tkTot, 1)), sk)
+    tct(tkT, 0, 2, "2.Temas", sk)
+    tct(tkT, 1, 2, f_rate(array.get(tkRej, 2), array.get(tkTot, 2)), sk)
+    tct(tkT, 0, 3, "3.Temas", sk)
+    tct(tkT, 1, 3, f_rate(array.get(tkRej, 3), array.get(tkTot, 3)), sk)
+    tct(tkT, 0, 4, "4.Temas", sk)
+    tct(tkT, 1, 4, f_rate(array.get(tkRej, 4), array.get(tkTot, 4)), sk)
+    tct(tkT, 0, 5, "5+ Temas", sk)
+    tct(tkT, 1, 5, f_rate(array.get(tkRej, 5), array.get(tkTot, 5)), sk)
+    tct(tkT, 0, 6, "ret = 3 ATR", sb)
+    tct(tkT, 1, 6, "kırılmadan", sb)
+    tct(tkT, 0, 7, "belirsiz hariç", sb)
+    tct(tkT, 1, 7, "", sb)
