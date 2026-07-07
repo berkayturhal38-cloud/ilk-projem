@@ -201,9 +201,8 @@ if strategy.position_size < 0 and useBE and not beDone and not na(posT1) and low
 if flat
     beDone := false
 
-// ---- ALARMLAR ---------------------------------------------------------------
-alertcondition(longSig,  "LONG Setup",  "Turhal AI Lite ST: LONG")
-alertcondition(shortSig, "SHORT Setup", "Turhal AI Lite ST: SHORT")
+// Not: strateji sürümünde alarmlar emir gerçekleşmelerinden (order fills) gelir;
+// alertcondition strateji içinde çalışmaz. Sinyal alarmı isteyen Lite indikatörünü kullanır.
 
 // ============================================================================
 //  METRİK PANELİ  (Strategy Tester'daki değerlerin özeti)
