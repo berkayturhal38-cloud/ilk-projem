@@ -10,7 +10,9 @@
 //  Bu dosya mevcut Lite indikatörünü DEĞİŞTİRMEZ; tamamen ayrıdır.
 //  Author: berkayturhal38 | License: MPL-2.0
 // ============================================================================
-strategy("Turhal AI PRO Lite — Strategy", "Turhal AI Lite ST", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 100, commission_type = strategy.commission.percent, commission_value = input.float(0.04, "Komisyon (%)", minval = 0.0, step = 0.01, group = "Backtest / Risk"), slippage = input.int(1, "Slippage (tick)", minval = 0, group = "Backtest / Risk"), pyramiding = 0, calc_on_every_tick = false, process_orders_on_close = true, close_entries_rule = "ANY")
+strategy("Turhal AI PRO Lite — Strategy", "Turhal AI Lite ST", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 100, commission_type = strategy.commission.percent, commission_value = 0.04, slippage = 1, pyramiding = 0, calc_on_every_tick = false, process_orders_on_close = true, close_entries_rule = "ANY")
+// NOT: Komisyon ve slippage TradingView'de ayarlar > "Özellikler (Properties)" sekmesinden
+// değiştirilir (Pine, bunları strategy() içinde input olarak kabul etmez; const olmalı).
 
 // ---- BACKTEST / RİSK --------------------------------------------------------
 gBT = "Backtest / Risk"
