@@ -57,20 +57,27 @@ var float entryPrice = na
 var float slPrice    = na
 var float tpPrice    = na
 
-// 1) GİRİŞ: yalnızca flat iken. Seviyeler saklanır.
+// 1) GİRİŞ: yalnızca flat iken emir gönderilir (SL/TP burada hesaplanmaz;
+//    çünkü gerçek dolum fiyatı sonraki bar açılışında oluşur).
 if goLong
-    entryPrice := close
-    slPrice    := close * (1 - slPct / 100)
-    tpPrice    := close * (1 + tpPct / 100)
     strategy.entry("LONG", strategy.long)
 
 if goShort
-    entryPrice := close
-    slPrice    := close * (1 + slPct / 100)
-    tpPrice    := close * (1 - tpPct / 100)
     strategy.entry("SHORT", strategy.short)
 
-// 2) ÇIKIŞ: pozisyon gerçekten açıldıktan sonra, yönüne göre her barda SL/TP.
+// 2) YENİ AÇILAN POZİSYONU tespit et; SL/TP'yi GERÇEK giriş fiyatından hesapla.
+justLong  = strategy.position_size > 0 and strategy.position_size[1] <= 0
+justShort = strategy.position_size < 0 and strategy.position_size[1] >= 0
+if justLong
+    entryPrice := strategy.position_avg_price
+    slPrice    := entryPrice * (1 - slPct / 100)
+    tpPrice    := entryPrice * (1 + tpPct / 100)
+if justShort
+    entryPrice := strategy.position_avg_price
+    slPrice    := entryPrice * (1 + slPct / 100)
+    tpPrice    := entryPrice * (1 - tpPct / 100)
+
+// 3) ÇIKIŞ: pozisyon yönüne göre her barda SL/TP.
 if strategy.position_size > 0
     strategy.exit("LONG-ÇIKIŞ", "LONG", stop = slPrice, limit = tpPrice)
 if strategy.position_size < 0
