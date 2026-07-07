@@ -103,7 +103,7 @@ tc(table tb, int c, int r, string s, color bg) => table.cell(tb, c, r, s, text_c
 hd = color.new(color.black, 10)
 kb = color.new(color.black, 25)
 var table dbg = table.new(position.top_right, 2, 7, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
-if showPanel and barstate.islast
+if showPanel
     tc(dbg, 0, 0, "TURHAL TEST 1",       hd)
     tc(dbg, 1, 0, "v1.0",                hd)
     tc(dbg, 0, 1, "Toplam LONG sinyali", kb)
