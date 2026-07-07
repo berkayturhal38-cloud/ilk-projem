@@ -102,7 +102,8 @@ tc(table tb, int c, int r, string s, color bg) => table.cell(tb, c, r, s, text_c
 
 hd = color.new(color.black, 10)
 kb = color.new(color.black, 25)
-var table dbg = table.new(position.top_right, 2, 7, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+gap = nEntered - opened
+var table dbg = table.new(position.top_right, 2, 9, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
 if showPanel
     tc(dbg, 0, 0, "TURHAL TEST 1",       hd)
     tc(dbg, 1, 0, "v1.0",                hd)
@@ -118,3 +119,7 @@ if showPanel
     tc(dbg, 1, 5, str.tostring(strategy.closedtrades), kb)
     tc(dbg, 0, 6, "Açık işlem",          kb)
     tc(dbg, 1, 6, str.tostring(strategy.opentrades),   kb)
+    tc(dbg, 0, 7, "Fark (komut-açılan)", kb)
+    tc(dbg, 1, 7, str.tostring(gap),     color.new(gap == 0 ? color.green : color.red, 40))
+    tc(dbg, 0, 8, "Öz sermaye",          kb)
+    tc(dbg, 1, 8, str.tostring(strategy.equity, "0"), color.new(strategy.equity < strategy.initial_capital ? color.red : color.green, 40))
