@@ -2,7 +2,7 @@
 // © berkayturhal38
 //@version=6
 // ============================================================================
-//  TURHAL TEST 2  —  v1.4  (2 ARDIŞIK KAPANIŞ + KADEMELİ TP/SL + SABİT USDT NOMİNAL)
+//  TURHAL TEST 2  —  v1.5  (2 ARDIŞIK KAPANIŞ + EMA500 TREND FİLTRESİ + TP/SL + USDT NOMİNAL)
 //  GİRİŞ: Fiyat EMA'nın bir tarafına geçtikten sonra ARDIŞIK İKİ mum o tarafta
 //         kapanırsa sinyal (yalnızca 2. mum kapanışında). Ara mum karşı tarafta
 //         kapanırsa kurulum iptal olur, yeni geçiş beklenir. Reversal korunur.
@@ -18,7 +18,8 @@ strategy("Turhal Test 2", "Turhal Test 2", overlay = true, initial_capital = 100
 //  GİRDİLER
 // ============================================================================
 gT = "Rejim (EMA)"
-emaLen = input.int(200, "EMA Rejim Periyodu", minval = 1, group = gT)
+emaLen    = input.int(200, "EMA Rejim Periyodu", minval = 1, group = gT)
+ema500Len = input.int(500, "Ana Trend EMA Periyodu", minval = 1, group = gT)
 
 gN = "Boyutlandırma"
 notionalUSDT = input.float(100, "İşlem Nominal Büyüklüğü (USDT)", minval = 1, step = 10, group = gN)
@@ -43,6 +44,7 @@ showPanel = input.bool(true, "Debug Panelini Göster", group = gV)
 //  tarafta kapanırsa sayaç sıfırlanır -> kurulum iptal, yeni geçiş beklenir.
 // ============================================================================
 ema    = ta.ema(close, emaLen)
+ema500 = ta.ema(close, ema500Len)
 active = time >= startDate and time <= endDate
 
 below = active and close < ema      // bu bar KENDİ EMA'sının altında kapandı
@@ -56,9 +58,15 @@ aboveN := above ? aboveN + 1 : 0
 shortSetup = belowN == 2   // 1. + 2. ardışık alt kapanış -> SHORT onayı
 longSetup  = aboveN == 2   // 1. + 2. ardışık üst kapanış -> LONG onayı
 
+// Ana trend filtresi: LONG yalnızca ema200>ema500, SHORT yalnızca ema200<ema500.
+// longSetup/shortSetup TEK BARLIK (==2) olduğundan, trend engellese bile setup KALICI
+// DEĞİLDİR; ileride trend dönse eski setup ateşlemez -> yeni 2-kapanış setup'ı şart.
+trendUp = ema > ema500
+trendDn = ema < ema500
+
 // Pozisyon guard'ları korunur (aynı yön tekrar açılmaz; ters yön reversal yapar)
-goLong  = active and longSetup  and strategy.position_size <= 0
-goShort = active and shortSetup and strategy.position_size >= 0
+goLong  = active and longSetup  and trendUp and strategy.position_size <= 0
+goShort = active and shortSetup and trendDn and strategy.position_size >= 0
 
 // Sabit ~USDT nominal boyut: qty = notional / fiyat (öz sermayeye bağlı DEĞİL, compounding YOK)
 qtyCalc = notionalUSDT / close
@@ -96,16 +104,20 @@ if justShort
 // ============================================================================
 var int nLongCmd  = 0
 var int nShortCmd = 0
-var int nOpen     = 0   // GERÇEK yeni pozisyon/yön açılışı (justLong or justShort)
-nLongCmd  := nLongCmd  + (goLong  ? 1 : 0)
-nShortCmd := nShortCmd + (goShort ? 1 : 0)
-nOpen     := nOpen     + ((justLong or justShort) ? 1 : 0)
-nEntered  = nLongCmd + nShortCmd
+var int nOpen       = 0   // GERÇEK yeni pozisyon/yön açılışı (justLong or justShort)
+var int nTrendBlock = 0   // trend filtresinin engellediği tamamlanmış setup (teşhis)
+trendBlock = active and ((longSetup and not trendUp) or (shortSetup and not trendDn))
+nLongCmd    := nLongCmd    + (goLong  ? 1 : 0)
+nShortCmd   := nShortCmd   + (goShort ? 1 : 0)
+nOpen       := nOpen       + ((justLong or justShort) ? 1 : 0)
+nTrendBlock := nTrendBlock + (trendBlock ? 1 : 0)
+nEntered    = nLongCmd + nShortCmd
 
 // ============================================================================
 //  GRAFİK GÖRSELLERİ
 // ============================================================================
-plot(ema, "EMA Rejim", color = color.new(color.orange, 0), linewidth = 2)
+plot(ema, "EMA 200 Rejim", color = color.new(color.orange, 0), linewidth = 2)
+plot(ema500, "EMA 500 Trend", color = color.new(color.blue, 0), linewidth = 2)
 plotshape(goLong,  "LONG",  shape.triangleup,   location.belowbar, color.new(color.green, 0), size = size.small, text = "LONG")
 plotshape(goShort, "SHORT", shape.triangledown, location.abovebar, color.new(color.red, 0),   size = size.small, text = "SHORT")
 bgcolor(color.new(strategy.position_size > 0 ? color.green : strategy.position_size < 0 ? color.red : color.gray, 92))
@@ -125,10 +137,10 @@ tc(table tb, int c, int r, string s, color bg) => table.cell(tb, c, r, s, text_c
 
 hd = color.new(color.black, 10)
 kb = color.new(color.black, 25)
-var table dbg = table.new(position.top_right, 2, 13, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+var table dbg = table.new(position.top_right, 2, 14, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
 if showPanel
     tc(dbg, 0, 0,  "TURHAL TEST 2",       hd)
-    tc(dbg, 1, 0,  "v1.4",                hd)
+    tc(dbg, 1, 0,  "v1.5",                hd)
     tc(dbg, 0, 1,  "EMA periyodu",        kb)
     tc(dbg, 1, 1,  str.tostring(emaLen),  kb)
     tc(dbg, 0, 2,  "Ardışık Üst / Alt",   kb)
@@ -151,5 +163,7 @@ if showPanel
     tc(dbg, 1, 10, posTxt,                kb)
     tc(dbg, 0, 11, "Giriş nominali $",    kb)
     tc(dbg, 1, 11, nomTxt,                color.new(color.blue, 40))
-    tc(dbg, 0, 12, "Öz sermaye",          kb)
-    tc(dbg, 1, 12, str.tostring(strategy.equity, "0"), color.new(strategy.equity < strategy.initial_capital ? color.red : color.green, 40))
+    tc(dbg, 0, 12, "Trend engeli",        kb)
+    tc(dbg, 1, 12, str.tostring(nTrendBlock), color.new(color.blue, 40))
+    tc(dbg, 0, 13, "Öz sermaye",          kb)
+    tc(dbg, 1, 13, str.tostring(strategy.equity, "0"), color.new(strategy.equity < strategy.initial_capital ? color.red : color.green, 40))
