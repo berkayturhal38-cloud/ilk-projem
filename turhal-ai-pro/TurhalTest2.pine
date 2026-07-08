@@ -5,7 +5,7 @@
 //  TURHAL TEST 2  —  v1.2  (EMA REJİM + %1 ONAY + KADEMELİ TP/SL)
 //  AMAÇ: EMA kesişimi tek başına işlem AÇMAZ. Önce fiyat EMA'ya temas eder
 //        (armed), sonra EMA'nın %P üstüne çıkarsa LONG, %P altına inerse SHORT.
-//        Sistem reversal ile yön değiştirir; SL/TP YOK.
+//        Sistem reversal ile yön değiştirir. v1.2: kademeli TP + sabit SL eklendi.
 //  KARARLAR (onaylı): temas = low<=ema and high>=ema | onay = close bazlı
 //                     eşik = GÜNCEL ema | armed yalnızca GERÇEK işlemde tüketilir.
 //  Bu dosya bağımsızdır; Test 1, Lite veya diğer dosyalara dokunmaz.
