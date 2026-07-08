@@ -2,12 +2,11 @@
 // © berkayturhal38
 //@version=6
 // ============================================================================
-//  TURHAL TEST 2  —  v1.2  (EMA REJİM + %1 ONAY + KADEMELİ TP/SL)
-//  AMAÇ: EMA kesişimi tek başına işlem AÇMAZ. Önce fiyat EMA'ya temas eder
-//        (armed), sonra EMA'nın %P üstüne çıkarsa LONG, %P altına inerse SHORT.
-//        Sistem reversal ile yön değiştirir. v1.2: kademeli TP + sabit SL eklendi.
-//  KARARLAR (onaylı): temas = low<=ema and high>=ema | onay = close bazlı
-//                     eşik = GÜNCEL ema | armed yalnızca GERÇEK işlemde tüketilir.
+//  TURHAL TEST 2  —  v1.3  (EMA 200 + 2 ARDIŞIK KAPANIŞ ONAYI + KADEMELİ TP/SL)
+//  GİRİŞ: Fiyat EMA'nın bir tarafına geçtikten sonra ARDIŞIK İKİ mum o tarafta
+//         kapanırsa sinyal (yalnızca 2. mum kapanışında). Ara mum karşı tarafta
+//         kapanırsa kurulum iptal olur, yeni geçiş beklenir. Reversal korunur.
+//  ÇIKIŞ: Kademeli TP (%2/%4/%6, 1/3 + 1/3 + kalan) + sabit SL %3; avg_price'tan.
 //  Bu dosya bağımsızdır; Test 1, Lite veya diğer dosyalara dokunmaz.
 //  License: MPL-2.0
 // ============================================================================
@@ -18,65 +17,55 @@ strategy("Turhal Test 2", "Turhal Test 2", overlay = true, initial_capital = 100
 // ============================================================================
 //  GİRDİLER
 // ============================================================================
-gT = "Rejim (EMA + Onay)"
-emaLen  = input.int(200, "EMA Rejim Periyodu", minval = 1, group = gT)
-confPct = input.float(1.0, "Onay Eşiği %", minval = 0.1, step = 0.1, group = gT)
+gT = "Rejim (EMA)"
+emaLen = input.int(200, "EMA Rejim Periyodu", minval = 1, group = gT)
 
 gD = "Test Aralığı"
 startDate = input.time(timestamp("01 Jan 2018 00:00 +0000"), "Başlangıç Tarihi", group = gD)
 endDate   = input.time(timestamp("01 Jan 2100 00:00 +0000"), "Bitiş Tarihi", group = gD)
 
-gR = "TP / SL (v1.2)"
+gR = "TP / SL"
 slPct  = input.float(3.0, "Sabit SL %", minval = 0.1, step = 0.1, group = gR)
 tp1Pct = input.float(2.0, "TP1 % (1/3)", minval = 0.1, step = 0.1, group = gR)
 tp2Pct = input.float(4.0, "TP2 % (1/3)", minval = 0.1, step = 0.1, group = gR)
 tp3Pct = input.float(6.0, "TP3 % (kalan)", minval = 0.1, step = 0.1, group = gR)
 
 gV = "Görünüm"
-showPanel  = input.bool(true, "Debug Panelini Göster", group = gV)
-showLevels = input.bool(true, "±% Onay Seviyelerini Göster", group = gV)
+showPanel = input.bool(true, "Debug Panelini Göster", group = gV)
 
 // ============================================================================
-//  SEVİYELER & OLAYLAR  (repaint'siz — kapanmış barın verisiyle)
-//  ta.ema ilk bardan değer üretir; tüm karşılaştırmalar bar kapanışında kesinleşir.
+//  GİRİŞ SİNYALİ  (EMA'nın bir tarafında 2 ARDIŞIK kapanış — repaint'siz)
+//  belowN/aboveN yalnızca test penceresinde (active) sayılır; pencere temiz başlar.
+//  Sinyal 2. ardışık kapanışta (==2) oluşur; aynı yönde tekrar etmez. Ara mum karşı
+//  tarafta kapanırsa sayaç sıfırlanır -> kurulum iptal, yeni geçiş beklenir.
 // ============================================================================
-ema      = ta.ema(close, emaLen)
-longLvl  = ema * (1 + confPct / 100)
-shortLvl = ema * (1 - confPct / 100)
+ema    = ta.ema(close, emaLen)
+active = time >= startDate and time <= endDate
 
-touch    = low <= ema and high >= ema      // TEMAS: mum aralığı EMA'yı içerir
-confLong  = close >= longLvl               // ONAY: kapanış %P üstünde
-confShort = close <= shortLvl              // ONAY: kapanış %P altında
+below = active and close < ema      // bu bar KENDİ EMA'sının altında kapandı
+above = active and close > ema      // bu bar KENDİ EMA'sının üstünde kapandı
 
-// ============================================================================
-//  STATE MACHINE  (armed = temas oldu, onay bekleniyor)
-//  Sıra: ÖNCE (önceki bara ait) armed ile doğrulama, SONRA bu barın teması ile arma.
-//  armed YALNIZCA gerçek bir işlem (açılış/reversal) olduğunda tüketilir.
-// ============================================================================
-var bool armed = false
-active = time >= startDate and time <= endDate   // TARİH FİLTRESİ: state/emir yalnızca pencerede aktif
+var int belowN = 0
+var int aboveN = 0
+belowN := below ? belowN + 1 : 0
+aboveN := above ? aboveN + 1 : 0
 
-tradeLong  = active and armed and confLong  and strategy.position_size <= 0   // flat veya short -> LONG
-tradeShort = active and armed and confShort and strategy.position_size >= 0   // flat veya long  -> SHORT
-// Teşhis: armed iken mevcut pozisyonla AYNI yön onayı geldi (işlem yok, armed korunur)
-sameDir    = active and armed and ((confLong and strategy.position_size > 0) or (confShort and strategy.position_size < 0))
+shortSetup = belowN == 2   // 1. + 2. ardışık alt kapanış -> SHORT onayı
+longSetup  = aboveN == 2   // 1. + 2. ardışık üst kapanış -> LONG onayı
 
-if tradeLong
+// Pozisyon guard'ları korunur (aynı yön tekrar açılmaz; ters yön reversal yapar)
+goLong  = active and longSetup  and strategy.position_size <= 0
+goShort = active and shortSetup and strategy.position_size >= 0
+
+if goLong
     strategy.entry("LONG", strategy.long)
-    armed := false
-else if tradeShort
+else if goShort
     strategy.entry("SHORT", strategy.short)
-    armed := false
-
-if active and touch
-    armed := true
 
 // ============================================================================
-//  TP / SL ÇIKIŞLARI  (yalnızca GERÇEK dolumda BİR KEZ; seviyeler avg_price'tan)
-//  Kademeli: TP1 ve TP2 birer 1/3 (mutlak qty -> dolum sırasından bağımsız),
-//  TP3 kalanı kapatır; ÜÇÜNDE de aynı sabit SL. Break-even/trailing YOK.
-//  Reversal'da eski yön çıkışları from_entry kopunca iptal olur; yeni yön
-//  çıkışları aşağıdaki justLong/justShort ile yeniden kurulur.
+//  TP / SL ÇIKIŞLARI  (v1.2'den korunuyor — gerçek dolumda BİR KEZ, avg_price'tan)
+//  TP1/TP2 birer 1/3 (mutlak qty), TP3 kalan; üçünde de aynı sabit SL. BE/trailing yok.
+//  Reversal'da eski yön çıkışları from_entry kopunca iptal olur; yeni yön burada kurulur.
 // ============================================================================
 justLong  = strategy.position_size > 0 and strategy.position_size[1] <= 0
 justShort = strategy.position_size < 0 and strategy.position_size[1] >= 0
@@ -96,16 +85,11 @@ if justShort
 // ============================================================================
 //  SAYAÇLAR
 // ============================================================================
-var int nTouch    = 0   // EMA teması (kenar: temas başlangıcı)
-var int nLongCmd  = 0   // LONG giriş komutu
-var int nShortCmd = 0   // SHORT giriş komutu
-var int nSameDir  = 0   // aynı yön onayı (boşa, armed korundu) — teşhis
+var int nLongCmd  = 0
+var int nShortCmd = 0
 var int nOpen     = 0   // GERÇEK yeni pozisyon/yön açılışı (justLong or justShort)
-touchEdge = touch and not touch[1]
-nTouch    := nTouch    + ((active and touchEdge)  ? 1 : 0)
-nLongCmd  := nLongCmd  + (tradeLong  ? 1 : 0)
-nShortCmd := nShortCmd + (tradeShort ? 1 : 0)
-nSameDir  := nSameDir  + (sameDir    ? 1 : 0)
+nLongCmd  := nLongCmd  + (goLong  ? 1 : 0)
+nShortCmd := nShortCmd + (goShort ? 1 : 0)
 nOpen     := nOpen     + ((justLong or justShort) ? 1 : 0)
 nEntered  = nLongCmd + nShortCmd
 
@@ -113,53 +97,47 @@ nEntered  = nLongCmd + nShortCmd
 //  GRAFİK GÖRSELLERİ
 // ============================================================================
 plot(ema, "EMA Rejim", color = color.new(color.orange, 0), linewidth = 2)
-plot(showLevels ? longLvl  : na, "+% Onay", color = color.new(color.green, 55), linewidth = 1)
-plot(showLevels ? shortLvl : na, "-% Onay", color = color.new(color.red, 55),   linewidth = 1)
-plotshape(tradeLong,  "LONG",  shape.triangleup,   location.belowbar, color.new(color.green, 0), size = size.small, text = "LONG")
-plotshape(tradeShort, "SHORT", shape.triangledown, location.abovebar, color.new(color.red, 0),   size = size.small, text = "SHORT")
+plotshape(goLong,  "LONG",  shape.triangleup,   location.belowbar, color.new(color.green, 0), size = size.small, text = "LONG")
+plotshape(goShort, "SHORT", shape.triangledown, location.abovebar, color.new(color.red, 0),   size = size.small, text = "SHORT")
 bgcolor(color.new(strategy.position_size > 0 ? color.green : strategy.position_size < 0 ? color.red : color.gray, 92))
 
 // ============================================================================
-//  DEBUG PANELİ  (YENİ MODEL — kademeli çıkış closedtrades'i böldüğü için
-//  eski "opened = closedtrades + opentrades = nEntered" DOĞRULAMASI GEÇERSİZ.)
-//  MOTOR DOĞRULAMASI:
-//   - gap2 = Toplam komut - Yeni açılış = 0 (son barda bekleyen emir varsa 1).
+//  DEBUG PANELİ  (motor doğrulaması yeni giriş mimarisine uyarlandı)
+//   - Fark2 = Toplam komut - Yeni açılış = 0 (son barda bekleyen emir varsa 1).
 //   - "Yeni açılış" justLong/justShort ile gerçek pozisyon/yön açılışını sayar.
-//   - "Kapanan (parçalı)" artık her TP dilimini AYRI sayar; giriş sayısına eşit
-//     olması BEKLENMEZ (kademeli çıkışın normal sonucu).
+//   - "Kapanan (parçalı)" her TP dilimini AYRI sayar; komut sayısına eşit BEKLENMEZ.
+//   - "Ardışık Üst/Alt" = aboveN / belowN (2 olunca sinyal) — kurulum teşhisi.
 // ============================================================================
 gap2   = nEntered - nOpen
 posTxt = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT"
-stTxt  = posTxt + (armed ? " • armed" : "")
+seqTxt = str.tostring(aboveN) + " / " + str.tostring(belowN)
 tc(table tb, int c, int r, string s, color bg) => table.cell(tb, c, r, s, text_color = color.white, bgcolor = bg, text_size = size.small)
 
 hd = color.new(color.black, 10)
 kb = color.new(color.black, 25)
-var table dbg = table.new(position.top_right, 2, 13, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+var table dbg = table.new(position.top_right, 2, 12, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
 if showPanel
     tc(dbg, 0, 0,  "TURHAL TEST 2",       hd)
-    tc(dbg, 1, 0,  "v1.2",                hd)
-    tc(dbg, 0, 1,  "Onay Eşiği %",        kb)
-    tc(dbg, 1, 1,  str.tostring(confPct), kb)
-    tc(dbg, 0, 2,  "EMA teması",          kb)
-    tc(dbg, 1, 2,  str.tostring(nTouch),  kb)
+    tc(dbg, 1, 0,  "v1.3",                hd)
+    tc(dbg, 0, 1,  "EMA periyodu",        kb)
+    tc(dbg, 1, 1,  str.tostring(emaLen),  kb)
+    tc(dbg, 0, 2,  "Ardışık Üst / Alt",   kb)
+    tc(dbg, 1, 2,  seqTxt,                kb)
     tc(dbg, 0, 3,  "LONG komut",          kb)
     tc(dbg, 1, 3,  str.tostring(nLongCmd), kb)
     tc(dbg, 0, 4,  "SHORT komut",         kb)
     tc(dbg, 1, 4,  str.tostring(nShortCmd), kb)
     tc(dbg, 0, 5,  "Toplam komut",        kb)
     tc(dbg, 1, 5,  str.tostring(nEntered), color.new(color.blue, 40))
-    tc(dbg, 0, 6,  "Aynı yön onayı (boşa)", kb)
-    tc(dbg, 1, 6,  str.tostring(nSameDir), color.new(color.blue, 40))
-    tc(dbg, 0, 7,  "Yeni açılış (justL/S)", kb)
-    tc(dbg, 1, 7,  str.tostring(nOpen),   color.new(color.blue, 40))
-    tc(dbg, 0, 8,  "Fark2 (komut-açılış)", kb)
-    tc(dbg, 1, 8,  str.tostring(gap2),    color.new(gap2 == 0 or gap2 == 1 ? color.green : color.red, 40))
-    tc(dbg, 0, 9,  "Kapanan (parçalı)",   kb)
-    tc(dbg, 1, 9,  str.tostring(strategy.closedtrades), kb)
-    tc(dbg, 0, 10, "Açık işlem",          kb)
-    tc(dbg, 1, 10, str.tostring(strategy.opentrades),   kb)
-    tc(dbg, 0, 11, "Durum",               kb)
-    tc(dbg, 1, 11, stTxt,                 kb)
-    tc(dbg, 0, 12, "Öz sermaye",          kb)
-    tc(dbg, 1, 12, str.tostring(strategy.equity, "0"), color.new(strategy.equity < strategy.initial_capital ? color.red : color.green, 40))
+    tc(dbg, 0, 6,  "Yeni açılış (justL/S)", kb)
+    tc(dbg, 1, 6,  str.tostring(nOpen),   color.new(color.blue, 40))
+    tc(dbg, 0, 7,  "Fark2 (komut-açılış)", kb)
+    tc(dbg, 1, 7,  str.tostring(gap2),    color.new(gap2 == 0 or gap2 == 1 ? color.green : color.red, 40))
+    tc(dbg, 0, 8,  "Kapanan (parçalı)",   kb)
+    tc(dbg, 1, 8,  str.tostring(strategy.closedtrades), kb)
+    tc(dbg, 0, 9,  "Açık işlem",          kb)
+    tc(dbg, 1, 9,  str.tostring(strategy.opentrades),   kb)
+    tc(dbg, 0, 10, "Durum",               kb)
+    tc(dbg, 1, 10, posTxt,                kb)
+    tc(dbg, 0, 11, "Öz sermaye",          kb)
+    tc(dbg, 1, 11, str.tostring(strategy.equity, "0"), color.new(strategy.equity < strategy.initial_capital ? color.red : color.green, 40))
