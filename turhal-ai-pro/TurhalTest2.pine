@@ -2,7 +2,7 @@
 // © berkayturhal38
 //@version=6
 // ============================================================================
-//  TURHAL TEST 2  —  v1.3  (EMA 200 + 2 ARDIŞIK KAPANIŞ ONAYI + KADEMELİ TP/SL)
+//  TURHAL TEST 2  —  v1.4  (2 ARDIŞIK KAPANIŞ + KADEMELİ TP/SL + SABİT USDT NOMİNAL)
 //  GİRİŞ: Fiyat EMA'nın bir tarafına geçtikten sonra ARDIŞIK İKİ mum o tarafta
 //         kapanırsa sinyal (yalnızca 2. mum kapanışında). Ara mum karşı tarafta
 //         kapanırsa kurulum iptal olur, yeni geçiş beklenir. Reversal korunur.
@@ -19,6 +19,9 @@ strategy("Turhal Test 2", "Turhal Test 2", overlay = true, initial_capital = 100
 // ============================================================================
 gT = "Rejim (EMA)"
 emaLen = input.int(200, "EMA Rejim Periyodu", minval = 1, group = gT)
+
+gN = "Boyutlandırma"
+notionalUSDT = input.float(100, "İşlem Nominal Büyüklüğü (USDT)", minval = 1, step = 10, group = gN)
 
 gD = "Test Aralığı"
 startDate = input.time(timestamp("01 Jan 2018 00:00 +0000"), "Başlangıç Tarihi", group = gD)
@@ -57,27 +60,33 @@ longSetup  = aboveN == 2   // 1. + 2. ardışık üst kapanış -> LONG onayı
 goLong  = active and longSetup  and strategy.position_size <= 0
 goShort = active and shortSetup and strategy.position_size >= 0
 
+// Sabit ~USDT nominal boyut: qty = notional / fiyat (öz sermayeye bağlı DEĞİL, compounding YOK)
+qtyCalc = notionalUSDT / close
+
 if goLong
-    strategy.entry("LONG", strategy.long)
+    strategy.entry("LONG", strategy.long, qty = qtyCalc)
 else if goShort
-    strategy.entry("SHORT", strategy.short)
+    strategy.entry("SHORT", strategy.short, qty = qtyCalc)
 
 // ============================================================================
 //  TP / SL ÇIKIŞLARI  (v1.2'den korunuyor — gerçek dolumda BİR KEZ, avg_price'tan)
 //  TP1/TP2 birer 1/3 (mutlak qty), TP3 kalan; üçünde de aynı sabit SL. BE/trailing yok.
 //  Reversal'da eski yön çıkışları from_entry kopunca iptal olur; yeni yön burada kurulur.
 // ============================================================================
+var float entryNom = na   // GİRİŞ anındaki gerçekleşen nominal (USDT); TP1/TP2 sonrası DEĞİŞMEZ
 justLong  = strategy.position_size > 0 and strategy.position_size[1] <= 0
 justShort = strategy.position_size < 0 and strategy.position_size[1] >= 0
 if justLong
     e     = strategy.position_avg_price
     third = strategy.position_size / 3.0
+    entryNom := math.abs(strategy.position_size) * e
     strategy.exit("L-TP1", "LONG", qty = third, stop = e * (1 - slPct / 100), limit = e * (1 + tp1Pct / 100))
     strategy.exit("L-TP2", "LONG", qty = third, stop = e * (1 - slPct / 100), limit = e * (1 + tp2Pct / 100))
     strategy.exit("L-TP3", "LONG",              stop = e * (1 - slPct / 100), limit = e * (1 + tp3Pct / 100))
 if justShort
     e     = strategy.position_avg_price
     third = -strategy.position_size / 3.0
+    entryNom := math.abs(strategy.position_size) * e
     strategy.exit("S-TP1", "SHORT", qty = third, stop = e * (1 + slPct / 100), limit = e * (1 - tp1Pct / 100))
     strategy.exit("S-TP2", "SHORT", qty = third, stop = e * (1 + slPct / 100), limit = e * (1 - tp2Pct / 100))
     strategy.exit("S-TP3", "SHORT",              stop = e * (1 + slPct / 100), limit = e * (1 - tp3Pct / 100))
@@ -111,14 +120,15 @@ bgcolor(color.new(strategy.position_size > 0 ? color.green : strategy.position_s
 gap2   = nEntered - nOpen
 posTxt = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT"
 seqTxt = str.tostring(aboveN) + " / " + str.tostring(belowN)
+nomTxt = na(entryNom) ? "-" : str.tostring(entryNom, "0.0")
 tc(table tb, int c, int r, string s, color bg) => table.cell(tb, c, r, s, text_color = color.white, bgcolor = bg, text_size = size.small)
 
 hd = color.new(color.black, 10)
 kb = color.new(color.black, 25)
-var table dbg = table.new(position.top_right, 2, 12, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+var table dbg = table.new(position.top_right, 2, 13, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
 if showPanel
     tc(dbg, 0, 0,  "TURHAL TEST 2",       hd)
-    tc(dbg, 1, 0,  "v1.3",                hd)
+    tc(dbg, 1, 0,  "v1.4",                hd)
     tc(dbg, 0, 1,  "EMA periyodu",        kb)
     tc(dbg, 1, 1,  str.tostring(emaLen),  kb)
     tc(dbg, 0, 2,  "Ardışık Üst / Alt",   kb)
@@ -139,5 +149,7 @@ if showPanel
     tc(dbg, 1, 9,  str.tostring(strategy.opentrades),   kb)
     tc(dbg, 0, 10, "Durum",               kb)
     tc(dbg, 1, 10, posTxt,                kb)
-    tc(dbg, 0, 11, "Öz sermaye",          kb)
-    tc(dbg, 1, 11, str.tostring(strategy.equity, "0"), color.new(strategy.equity < strategy.initial_capital ? color.red : color.green, 40))
+    tc(dbg, 0, 11, "Giriş nominali $",    kb)
+    tc(dbg, 1, 11, nomTxt,                color.new(color.blue, 40))
+    tc(dbg, 0, 12, "Öz sermaye",          kb)
+    tc(dbg, 1, 12, str.tostring(strategy.equity, "0"), color.new(strategy.equity < strategy.initial_capital ? color.red : color.green, 40))
