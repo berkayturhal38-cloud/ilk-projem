@@ -22,6 +22,10 @@ gT = "Rejim (EMA + Onay)"
 emaLen  = input.int(200, "EMA Rejim Periyodu", minval = 1, group = gT)
 confPct = input.float(1.0, "Onay Eşiği %", minval = 0.1, step = 0.1, group = gT)
 
+gD = "Test Aralığı"
+startDate = input.time(timestamp("01 Jan 2018 00:00 +0000"), "Başlangıç Tarihi", group = gD)
+endDate   = input.time(timestamp("01 Jan 2100 00:00 +0000"), "Bitiş Tarihi", group = gD)
+
 gV = "Görünüm"
 showPanel  = input.bool(true, "Debug Panelini Göster", group = gV)
 showLevels = input.bool(true, "±% Onay Seviyelerini Göster", group = gV)
@@ -44,11 +48,12 @@ confShort = close <= shortLvl              // ONAY: kapanış %P altında
 //  armed YALNIZCA gerçek bir işlem (açılış/reversal) olduğunda tüketilir.
 // ============================================================================
 var bool armed = false
+active = time >= startDate and time <= endDate   // TARİH FİLTRESİ: state/emir yalnızca pencerede aktif
 
-tradeLong  = armed and confLong  and strategy.position_size <= 0   // flat veya short -> LONG
-tradeShort = armed and confShort and strategy.position_size >= 0   // flat veya long  -> SHORT
+tradeLong  = active and armed and confLong  and strategy.position_size <= 0   // flat veya short -> LONG
+tradeShort = active and armed and confShort and strategy.position_size >= 0   // flat veya long  -> SHORT
 // Teşhis: armed iken mevcut pozisyonla AYNI yön onayı geldi (işlem yok, armed korunur)
-sameDir    = armed and ((confLong and strategy.position_size > 0) or (confShort and strategy.position_size < 0))
+sameDir    = active and armed and ((confLong and strategy.position_size > 0) or (confShort and strategy.position_size < 0))
 
 if tradeLong
     strategy.entry("LONG", strategy.long)
@@ -57,7 +62,7 @@ else if tradeShort
     strategy.entry("SHORT", strategy.short)
     armed := false
 
-if touch
+if active and touch
     armed := true
 
 // ============================================================================
@@ -68,7 +73,7 @@ var int nLongCmd  = 0   // LONG giriş komutu
 var int nShortCmd = 0   // SHORT giriş komutu
 var int nSameDir  = 0   // aynı yön onayı (boşa, armed korundu) — teşhis
 touchEdge = touch and not touch[1]
-nTouch    := nTouch    + (touchEdge  ? 1 : 0)
+nTouch    := nTouch    + ((active and touchEdge)  ? 1 : 0)
 nLongCmd  := nLongCmd  + (tradeLong  ? 1 : 0)
 nShortCmd := nShortCmd + (tradeShort ? 1 : 0)
 nSameDir  := nSameDir  + (sameDir    ? 1 : 0)
