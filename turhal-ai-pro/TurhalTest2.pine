@@ -2,10 +2,11 @@
 // © berkayturhal38
 //@version=6
 // ============================================================================
-//  TURHAL TEST 2  —  v1.5  (2 ARDIŞIK KAPANIŞ + EMA500 TREND FİLTRESİ + TP/SL + USDT NOMİNAL)
-//  GİRİŞ: Fiyat EMA'nın bir tarafına geçtikten sonra ARDIŞIK İKİ mum o tarafta
-//         kapanırsa sinyal (yalnızca 2. mum kapanışında). Ara mum karşı tarafta
-//         kapanırsa kurulum iptal olur, yeni geçiş beklenir. Reversal korunur.
+//  TURHAL TEST 2  —  v1.6  (EMA200 GERÇEK GEÇİŞ + 2. ONAY + EMA500 TREND + TP/SL + USDT)
+//  GİRİŞ: Fiyat EMA200'ü GERÇEKTEN keser (crossUp/crossDn = geçiş mumu, 1. onay);
+//         hemen sonraki mum aynı tarafta kapanır VE trend hâlâ uygunsa 2. onay -> sinyal.
+//         2. onaydan önce karşı tarafa dönerse ya da trend bozulursa setup iptal olur.
+//         Trend (EMA500) setup BAŞLANGICINDA ve 2. ONAYDA kontrol edilir. Reversal korunur.
 //  ÇIKIŞ: Kademeli TP (%2/%4/%6, 1/3 + 1/3 + kalan) + sabit SL %3; avg_price'tan.
 //  Bu dosya bağımsızdır; Test 1, Lite veya diğer dosyalara dokunmaz.
 //  License: MPL-2.0
@@ -38,35 +39,53 @@ gV = "Görünüm"
 showPanel = input.bool(true, "Debug Panelini Göster", group = gV)
 
 // ============================================================================
-//  GİRİŞ SİNYALİ  (EMA'nın bir tarafında 2 ARDIŞIK kapanış — repaint'siz)
-//  belowN/aboveN yalnızca test penceresinde (active) sayılır; pencere temiz başlar.
-//  Sinyal 2. ardışık kapanışta (==2) oluşur; aynı yönde tekrar etmez. Ara mum karşı
-//  tarafta kapanırsa sayaç sıfırlanır -> kurulum iptal, yeni geçiş beklenir.
+//  GİRİŞ SİNYALİ  (EMA200 GERÇEK GEÇİŞ + 2. ONAY state-machine — repaint'siz)
+//  1. onay = gerçek cross (crossUp/crossDn); 2. onay = hemen sonraki mum aynı tarafta
+//  kapanır VE trend hâlâ uygun. Karşı tarafa dönüş veya trend bozulması -> iptal.
+//  pend yalnızca test penceresinde (active) ilerler; pencere temiz (pend=0) başlar.
 // ============================================================================
 ema    = ta.ema(close, emaLen)
 ema500 = ta.ema(close, ema500Len)
 active = time >= startDate and time <= endDate
 
-below = active and close < ema      // bu bar KENDİ EMA'sının altında kapandı
-above = active and close > ema      // bu bar KENDİ EMA'sının üstünde kapandı
-
-var int belowN = 0
-var int aboveN = 0
-belowN := below ? belowN + 1 : 0
-aboveN := above ? aboveN + 1 : 0
-
-shortSetup = belowN == 2   // 1. + 2. ardışık alt kapanış -> SHORT onayı
-longSetup  = aboveN == 2   // 1. + 2. ardışık üst kapanış -> LONG onayı
-
-// Ana trend filtresi: LONG yalnızca ema200>ema500, SHORT yalnızca ema200<ema500.
-// longSetup/shortSetup TEK BARLIK (==2) olduğundan, trend engellese bile setup KALICI
-// DEĞİLDİR; ileride trend dönse eski setup ateşlemez -> yeni 2-kapanış setup'ı şart.
+// Ana trend (EMA500) — setup başlangıcında VE 2. onayda kontrol edilir
 trendUp = ema > ema500
 trendDn = ema < ema500
 
-// Pozisyon guard'ları korunur (aynı yön tekrar açılmaz; ters yön reversal yapar)
-goLong  = active and longSetup  and trendUp and strategy.position_size <= 0
-goShort = active and shortSetup and trendDn and strategy.position_size >= 0
+// GERÇEK geçiş (koşulsuz hesaplanmalı; ta.* if içine alınmaz)
+crossUp = ta.crossover(close, ema)   // önceki bar <= EMA200, bu bar > EMA200 (geçiş mumu = 1. onay)
+crossDn = ta.crossunder(close, ema)  // önceki bar >= EMA200, bu bar < EMA200
+
+// pend state-machine: 0 = yok, +1 = LONG 2. onay bekliyor, -1 = SHORT bekliyor
+var int pend = 0
+longSetup   = false
+shortSetup  = false
+trendCancel = false   // 2. onayda close doğru tarafta AMA trend bozuldu -> iptal (teşhis)
+if active
+    // 1) bekleyen 2. onayı bu barın kapanışı + trend YENİDEN kontrol ile değerlendir
+    if pend == 1
+        if close > ema and trendUp
+            longSetup := true
+        else if close > ema
+            trendCancel := true
+        pend := 0
+    else if pend == -1
+        if close < ema and trendDn
+            shortSetup := true
+        else if close < ema
+            trendCancel := true
+        pend := 0
+    // 2) yeni setup başlangıcı: gerçek geçiş + uygun trend (aksi halde setup kurulmaz)
+    if crossUp and trendUp
+        pend := 1
+    else if crossDn and trendDn
+        pend := -1
+else
+    pend := 0
+
+// Pozisyon guard'ları korunur (trend zaten longSetup/shortSetup içinde doğrulandı)
+goLong  = active and longSetup  and strategy.position_size <= 0
+goShort = active and shortSetup and strategy.position_size >= 0
 
 // Sabit ~USDT nominal boyut: qty = notional / fiyat (öz sermayeye bağlı DEĞİL, compounding YOK)
 qtyCalc = notionalUSDT / close
@@ -105,12 +124,14 @@ if justShort
 var int nLongCmd  = 0
 var int nShortCmd = 0
 var int nOpen       = 0   // GERÇEK yeni pozisyon/yön açılışı (justLong or justShort)
-var int nTrendBlock = 0   // trend filtresinin engellediği tamamlanmış setup (teşhis)
-trendBlock = active and ((longSetup and not trendUp) or (shortSetup and not trendDn))
+var int nTrendBlock = 0   // trend teşhisi: (a) trend yüzünden BAŞLAMAYAN gerçek cross +
+                          //                (b) 2. onayda trend bozulup İPTAL edilen setup.
+// (a) ve (b) aynı barda birlikte oluşamaz (biri cross barı, diğeri pend-çözüm barı) -> çift sayım YOK
+startBlock = active and ((crossUp and not trendUp) or (crossDn and not trendDn))
 nLongCmd    := nLongCmd    + (goLong  ? 1 : 0)
 nShortCmd   := nShortCmd   + (goShort ? 1 : 0)
 nOpen       := nOpen       + ((justLong or justShort) ? 1 : 0)
-nTrendBlock := nTrendBlock + (trendBlock ? 1 : 0)
+nTrendBlock := nTrendBlock + ((startBlock or trendCancel) ? 1 : 0)
 nEntered    = nLongCmd + nShortCmd
 
 // ============================================================================
@@ -127,11 +148,11 @@ bgcolor(color.new(strategy.position_size > 0 ? color.green : strategy.position_s
 //   - Fark2 = Toplam komut - Yeni açılış = 0 (son barda bekleyen emir varsa 1).
 //   - "Yeni açılış" justLong/justShort ile gerçek pozisyon/yön açılışını sayar.
 //   - "Kapanan (parçalı)" her TP dilimini AYRI sayar; komut sayısına eşit BEKLENMEZ.
-//   - "Ardışık Üst/Alt" = aboveN / belowN (2 olunca sinyal) — kurulum teşhisi.
+//   - "Bekleyen onay" = 2. onay beklenen yön (pend) — state-machine teşhisi.
 // ============================================================================
 gap2   = nEntered - nOpen
 posTxt = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT"
-seqTxt = str.tostring(aboveN) + " / " + str.tostring(belowN)
+pendTxt = pend == 1 ? "LONG bekliyor" : pend == -1 ? "SHORT bekliyor" : "-"
 nomTxt = na(entryNom) ? "-" : str.tostring(entryNom, "0.0")
 tc(table tb, int c, int r, string s, color bg) => table.cell(tb, c, r, s, text_color = color.white, bgcolor = bg, text_size = size.small)
 
@@ -140,11 +161,11 @@ kb = color.new(color.black, 25)
 var table dbg = table.new(position.top_right, 2, 14, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
 if showPanel
     tc(dbg, 0, 0,  "TURHAL TEST 2",       hd)
-    tc(dbg, 1, 0,  "v1.5",                hd)
+    tc(dbg, 1, 0,  "v1.6",                hd)
     tc(dbg, 0, 1,  "EMA periyodu",        kb)
     tc(dbg, 1, 1,  str.tostring(emaLen),  kb)
-    tc(dbg, 0, 2,  "Ardışık Üst / Alt",   kb)
-    tc(dbg, 1, 2,  seqTxt,                kb)
+    tc(dbg, 0, 2,  "Bekleyen onay",       kb)
+    tc(dbg, 1, 2,  pendTxt,               kb)
     tc(dbg, 0, 3,  "LONG komut",          kb)
     tc(dbg, 1, 3,  str.tostring(nLongCmd), kb)
     tc(dbg, 0, 4,  "SHORT komut",         kb)
