@@ -2,9 +2,10 @@
 // © berkayturhal38
 //@version=6
 // ============================================================================
-//  TURHAL TEST 2  —  v1.8  (SAF EMA200 KESİŞİM + REVERSAL)
-//  GİRİŞ: crossUp = ta.crossover(close, ema) -> LONG; crossDn = ta.crossunder -> SHORT.
-//         Tek kriter EMA200 gerçek kesişimi (tek-atışlık). Trend filtresi / 2. onay YOK.
+//  TURHAL TEST 2  —  v1.9  (MODEL 3: STATE-MACHINE FİZİKSEL EMA200 GEÇİŞİ + REVERSAL)
+//  GİRİŞ: side (kalıcı yön) tutulur. side=-1 iken physicalUp (low<=ema and close>ema) -> LONG;
+//         side=+1 iken physicalDown (high>=ema and close<ema) -> SHORT. Sinyalde side döner.
+//         Fitil/temas ve gap-atlama ELENİR; yalnızca fiziksel kesip karşı bölgeye taşıma sayılır.
 //  ÇIKIŞ: TP/SL YOK. Pozisyon yalnızca ters sinyalin reversal'ı ile kapanır (always-in-market).
 //  Bu dosya bağımsızdır; Test 1, Lite veya diğer dosyalara dokunmaz.
 //  License: MPL-2.0
@@ -30,18 +31,35 @@ gV = "Görünüm"
 showPanel = input.bool(true, "Debug Panelini Göster", group = gV)
 
 // ============================================================================
-//  GİRİŞ SİNYALİ  (SAF EMA200 KESİŞİM — repaint'siz, tek-atışlık)
-//  crossUp -> LONG, crossDn -> SHORT. Pozisyon guard'ları ters yönde reversal sağlar.
+//  GİRİŞ SİNYALİ  (MODEL 3 — state-machine fiziksel EMA200 geçişi, repaint'siz)
+//  side: +1 = üst bölge, -1 = alt bölge (kalıcı). İlk aktif barda close/ema ile başlar.
+//  physicalUp   = aralık aşağıdan çizgiyi kesip ÜSTTE kapandı (low<=ema and close>ema).
+//  physicalDown = aralık yukarıdan çizgiyi kesip ALTTA kapandı (high>=ema and close<ema).
+//  Yalnızca side==-1 & physicalUp -> LONG; side==+1 & physicalDown -> SHORT. Fitil/gap elenir.
+//  Gap/fiziksel kesiş olmadan side close'a göre resync EDİLMEZ (saf Model 3).
 // ============================================================================
 ema    = ta.ema(close, emaLen)
 active = time >= startDate and time <= endDate
 
-crossUp = ta.crossover(close, ema)   // önceki bar <= EMA200, bu bar > EMA200 -> LONG
-crossDn = ta.crossunder(close, ema)  // önceki bar >= EMA200, bu bar < EMA200 -> SHORT
+physicalUp   = low  <= ema and close > ema
+physicalDown = high >= ema and close < ema
+
+var int side = 0   // 0 = henüz belirlenmedi, +1 = üst bölge, -1 = alt bölge
+longSig  = false
+shortSig = false
+if active
+    if side == 0
+        side := close >= ema ? 1 : -1
+    else if side == -1 and physicalUp
+        side := 1
+        longSig := true
+    else if side == 1 and physicalDown
+        side := -1
+        shortSig := true
 
 // Pozisyon guard'ları korunur (aynı yön tekrar açılmaz; ters yön reversal yapar)
-goLong  = active and crossUp and strategy.position_size <= 0
-goShort = active and crossDn and strategy.position_size >= 0
+goLong  = active and longSig  and strategy.position_size <= 0
+goShort = active and shortSig and strategy.position_size >= 0
 
 // Sabit ~USDT nominal boyut: qty = notional / fiyat (öz sermayeye bağlı DEĞİL, compounding YOK)
 qtyCalc = notionalUSDT / close
@@ -89,31 +107,34 @@ bgcolor(color.new(strategy.position_size > 0 ? color.green : strategy.position_s
 gap2   = nEntered - nOpen
 posTxt = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT"
 nomTxt = na(entryNom) ? "-" : str.tostring(entryNom, "0.0")
+sideTxt = side == 1 ? "ÜST" : side == -1 ? "ALT" : "-"
 tc(table tb, int c, int r, string s, color bg) => table.cell(tb, c, r, s, text_color = color.white, bgcolor = bg, text_size = size.small)
 
 hd = color.new(color.black, 10)
 kb = color.new(color.black, 25)
-var table dbg = table.new(position.top_right, 2, 11, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+var table dbg = table.new(position.top_right, 2, 12, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
 if showPanel
     tc(dbg, 0, 0,  "TURHAL TEST 2",       hd)
-    tc(dbg, 1, 0,  "v1.8",                hd)
+    tc(dbg, 1, 0,  "v1.9",                hd)
     tc(dbg, 0, 1,  "EMA periyodu",        kb)
     tc(dbg, 1, 1,  str.tostring(emaLen),  kb)
-    tc(dbg, 0, 2,  "LONG komut",          kb)
-    tc(dbg, 1, 2,  str.tostring(nLongCmd), kb)
-    tc(dbg, 0, 3,  "SHORT komut",         kb)
-    tc(dbg, 1, 3,  str.tostring(nShortCmd), kb)
-    tc(dbg, 0, 4,  "Toplam komut",        kb)
-    tc(dbg, 1, 4,  str.tostring(nEntered), color.new(color.blue, 40))
-    tc(dbg, 0, 5,  "Yeni açılış (justL/S)", kb)
-    tc(dbg, 1, 5,  str.tostring(nOpen),   color.new(color.blue, 40))
-    tc(dbg, 0, 6,  "Fark2 (komut-açılış)", kb)
-    tc(dbg, 1, 6,  str.tostring(gap2),    color.new(gap2 == 0 or gap2 == 1 ? color.green : color.red, 40))
-    tc(dbg, 0, 7,  "Açık işlem",          kb)
-    tc(dbg, 1, 7,  str.tostring(strategy.opentrades),   kb)
-    tc(dbg, 0, 8,  "Durum",               kb)
-    tc(dbg, 1, 8,  posTxt,                kb)
-    tc(dbg, 0, 9,  "Giriş nominali $",    kb)
-    tc(dbg, 1, 9,  nomTxt,                color.new(color.blue, 40))
-    tc(dbg, 0, 10, "Öz sermaye",          kb)
-    tc(dbg, 1, 10, str.tostring(strategy.equity, "0"), color.new(strategy.equity < strategy.initial_capital ? color.red : color.green, 40))
+    tc(dbg, 0, 2,  "Fiziksel yön",        kb)
+    tc(dbg, 1, 2,  sideTxt,               color.new(side == 1 ? color.green : side == -1 ? color.red : color.gray, 40))
+    tc(dbg, 0, 3,  "LONG komut",          kb)
+    tc(dbg, 1, 3,  str.tostring(nLongCmd), kb)
+    tc(dbg, 0, 4,  "SHORT komut",         kb)
+    tc(dbg, 1, 4,  str.tostring(nShortCmd), kb)
+    tc(dbg, 0, 5,  "Toplam komut",        kb)
+    tc(dbg, 1, 5,  str.tostring(nEntered), color.new(color.blue, 40))
+    tc(dbg, 0, 6,  "Yeni açılış (justL/S)", kb)
+    tc(dbg, 1, 6,  str.tostring(nOpen),   color.new(color.blue, 40))
+    tc(dbg, 0, 7,  "Fark2 (komut-açılış)", kb)
+    tc(dbg, 1, 7,  str.tostring(gap2),    color.new(gap2 == 0 or gap2 == 1 ? color.green : color.red, 40))
+    tc(dbg, 0, 8,  "Açık işlem",          kb)
+    tc(dbg, 1, 8,  str.tostring(strategy.opentrades),   kb)
+    tc(dbg, 0, 9,  "Durum",               kb)
+    tc(dbg, 1, 9,  posTxt,                kb)
+    tc(dbg, 0, 10, "Giriş nominali $",    kb)
+    tc(dbg, 1, 10, nomTxt,                color.new(color.blue, 40))
+    tc(dbg, 0, 11, "Öz sermaye",          kb)
+    tc(dbg, 1, 11, str.tostring(strategy.equity, "0"), color.new(strategy.equity < strategy.initial_capital ? color.red : color.green, 40))
