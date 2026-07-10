@@ -143,10 +143,10 @@ fibCol(float r) => r == 0.0 or r == 1.0 ? color.new(color.gray, 0) : r == 0.5 ? 
 var line[]  fibLn = array.new_line()
 var label[] fibLb = array.new_label()
 if barstate.islast
-    for i = 0 to array.size(fibLn) - 1
-        line.delete(array.get(fibLn, i))
-    for i = 0 to array.size(fibLb) - 1
-        label.delete(array.get(fibLb, i))
+    for ln in fibLn
+        line.delete(ln)
+    for lb in fibLb
+        label.delete(lb)
     array.clear(fibLn)
     array.clear(fibLb)
     if structDir != 0 and not na(a1P) and not na(a2P) and not na(a1T) and not na(a2T)
