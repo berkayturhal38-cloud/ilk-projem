@@ -5,14 +5,14 @@
 //  TURHAL ANCHOR TEŞHİS  —  vB/C (BOS-onaylı in-play displacement leg)
 //  AMAÇ: Profesyonel traderın manuel Fibonacci çekerken seçeceği 1. (A1) ve 2.
 //        (A2) anchor noktalarını algoritmik taklit etmek.
-//  SADECE: A1 anchor + A2 anchor + aralarındaki çizgi + debug paneli.
-//  YOK: Fibonacci, EMA, strateji, LONG/SHORT, destek/direnç, TP/SL.
+//  ÇİZİM: A1 anchor + A2 anchor + leg çizgisi + GÖRSEL Fib seti (yalnızca teşhis).
+//  YOK: EMA, strateji, LONG/SHORT sinyali, TP/SL. Fib yalnızca GÖRSEL; mantığa katılmaz.
 //  MOTOR: DC (k*ATR) yalnızca swing ONAYI için; BOS (close kırılımı) leg seçimi.
 //         4H kaynak, request.security lookahead_off, non-repaint, future-leak yok.
 //         State yalnızca yeni KAPANMIŞ 4H barında bir kez işlenir (newBar4 + [1]).
 //  License: MPL-2.0
 // ============================================================================
-indicator("Turhal Anchor Teşhis", "Turhal Anchor", overlay = true, max_lines_count = 3, max_labels_count = 4)
+indicator("Turhal Anchor Teşhis", "Turhal Anchor", overlay = true, max_lines_count = 20, max_labels_count = 20)
 
 // ============================================================================
 //  GİRDİLER
@@ -131,6 +131,36 @@ if barstate.islast
         legLn := line.new(a1T, a1P, a2T, a2P, xloc = xloc.bar_time, color = col, width = 2)
         a1Lb := label.new(a1T, a1P, "A1  " + str.tostring(a1P, format.mintick), xloc = xloc.bar_time, style = structDir == 1 ? label.style_label_up : label.style_label_down, color = color.new(color.gray, 15), textcolor = color.white, size = size.small)
         a2Lb := label.new(a2T, a2P, "A2  " + str.tostring(a2P, format.mintick), xloc = xloc.bar_time, style = structDir == 1 ? label.style_label_down : label.style_label_up, color = col, textcolor = color.white, size = size.small)
+
+// ============================================================================
+//  GÖRSEL FIBONACCI SETİ  (yalnızca teşhis; a1P/a2P motoruna DOKUNMAZ)
+//  TradingView Fib: 0 seviyesi A2 (terminus), 1.0 seviyesi A1 (köken).
+//  price(r) = a2P + r*(a1P - a2P) -> HIGH->LOW ve LOW->HIGH otomatik doğru.
+//  Tek aktif set: her çizimde eskiler silinir. Sinyal/strateji/S-R DEĞİL.
+// ============================================================================
+fibCol(float r) => r == 0.0 or r == 1.0 ? color.new(color.gray, 0) : r == 0.5 ? color.new(color.orange, 0) : (r == 0.618 or r == 0.382) ? color.new(color.teal, 0) : color.new(color.blue, 20)
+
+var line[]  fibLn = array.new_line()
+var label[] fibLb = array.new_label()
+if barstate.islast
+    for i = 0 to array.size(fibLn) - 1
+        line.delete(array.get(fibLn, i))
+    for i = 0 to array.size(fibLb) - 1
+        label.delete(array.get(fibLb, i))
+    array.clear(fibLn)
+    array.clear(fibLb)
+    if structDir != 0 and not na(a1P) and not na(a2P) and not na(a1T) and not na(a2T)
+        ratios = array.from(0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0)
+        xStart = a1T < a2T ? a1T : a2T
+        xEnd   = a1T < a2T ? a2T : a1T
+        for i = 0 to array.size(ratios) - 1
+            r  = array.get(ratios, i)
+            pr = a2P + r * (a1P - a2P)
+            fc = fibCol(r)
+            ln = line.new(xStart, pr, xEnd, pr, xloc = xloc.bar_time, extend = extend.right, color = fc, style = (r == 0.0 or r == 1.0) ? line.style_solid : line.style_dashed, width = 1)
+            array.push(fibLn, ln)
+            lb = label.new(time, pr, str.tostring(r, "0.000") + "   " + str.tostring(pr, format.mintick), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 20), textcolor = fc, size = size.small)
+            array.push(fibLb, lb)
 
 // ============================================================================
 //  DEBUG PANELİ
