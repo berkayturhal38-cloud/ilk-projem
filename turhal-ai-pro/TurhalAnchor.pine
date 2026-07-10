@@ -51,6 +51,19 @@ var int   a2T = na
 var int   nFlip = 0
 var int   nBar4 = 0
 
+// ---- FIB STRENGTH SCORE v1 durumu (görsel/teşhis; motora KATILMAZ) ----
+// Seviye sırası: 0-6 ana [0,0.236,0.382,0.5,0.618,0.786,1], 7-12 ara [0.118,0.309,0.441,0.559,0.702,0.893]
+var float[] allR      = array.from(0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0, 0.118, 0.309, 0.441, 0.559, 0.702, 0.893)
+var int[]   scArr      = array.new_int(13, 0)      // seviye skoru
+var int[]   sideArr    = array.new_int(13, 0)      // fiyatın seviyeye göre tarafı (+1/-1)
+var bool[]  armedArr   = array.new_bool(13, true)  // TOUCH re-arm (spam engeli)
+var int[]   stArr      = array.new_int(13, 0)      // 0 = IDLE, 1 = BROKEN
+var int[]   brkDirArr  = array.new_int(13, 0)      // kırılım yönü
+var int[]   brkNArr    = array.new_int(13, 0)      // kırılımdan bu yana 4H bar sayısı
+var int[]   preSideArr = array.new_int(13, 0)      // kırılım öncesi taraf
+var float   prevA1P    = na                        // anchor değişimi tespiti (reset)
+var float   prevA2P    = na
+
 // ============================================================================
 //  STATE MACHINE  (yalnızca kapanmış 4H barında, bir kez)
 // ============================================================================
@@ -116,6 +129,72 @@ if newBar4
         a2P := L4
         a2T := T4
 
+    // ---- FIB STRENGTH SCORE v1 (yalnızca kapanmış 4H; motora KATILMAZ) ----
+    if structDir != 0 and not na(a1P) and not na(a2P) and not na(A4)
+        chg = na(prevA1P) or a1P != prevA1P or a2P != prevA2P
+        prevA1P := a1P
+        prevA2P := a2P
+        for idx = 0 to 12
+            r = array.get(allR, idx)
+            L = a2P + r * (a1P - a2P)
+            nSide = C4 >= L ? 1 : -1
+            if chg
+                array.set(scArr, idx, 0)
+                array.set(sideArr, idx, nSide)
+                array.set(armedArr, idx, true)
+                array.set(stArr, idx, 0)
+                array.set(brkNArr, idx, 0)
+                array.set(brkDirArr, idx, 0)
+                array.set(preSideArr, idx, nSide)
+            else
+                sc      = array.get(scArr, idx)
+                side    = array.get(sideArr, idx)
+                armed   = array.get(armedArr, idx)
+                st      = array.get(stArr, idx)
+                brkDir  = array.get(brkDirArr, idx)
+                brkN    = array.get(brkNArr, idx)
+                preSide = array.get(preSideArr, idx)
+                covers  = L4 <= L and H4 >= L
+                far05   = math.abs(C4 - L) >= 0.5 * A4
+                far10   = math.abs(C4 - L) >= 1.0 * A4
+                if st == 0
+                    if nSide != side
+                        st := 1
+                        brkDir := nSide
+                        brkN := 0
+                        preSide := side
+                    else if covers and armed
+                        sc := sc + 1
+                        armed := false
+                        if far05
+                            sc := sc + 2
+                    else if not armed and far05
+                        armed := true
+                    side := nSide
+                else
+                    brkN := brkN + 1
+                    resolved = false
+                    if brkN <= 3 and nSide == preSide
+                        sc := sc - 2
+                        resolved := true
+                    if not resolved and brkN <= 10 and covers and far05 and nSide == brkDir
+                        sc := sc + 3
+                        resolved := true
+                    if not resolved and nSide == brkDir and far10
+                        sc := sc - 1
+                        resolved := true
+                    if resolved or brkN > 10
+                        st := 0
+                        side := nSide
+                        armed := true
+                array.set(scArr, idx, sc)
+                array.set(sideArr, idx, side)
+                array.set(armedArr, idx, armed)
+                array.set(stArr, idx, st)
+                array.set(brkDirArr, idx, brkDir)
+                array.set(brkNArr, idx, brkN)
+                array.set(preSideArr, idx, preSide)
+
 // ============================================================================
 //  ÇİZİM  (yalnızca A1, A2 ve aralarındaki çizgi — son barda güncellenir)
 // ============================================================================
@@ -156,10 +235,12 @@ if barstate.islast
         for i = 0 to array.size(ratios) - 1
             r  = array.get(ratios, i)
             pr = a2P + r * (a1P - a2P)
-            fc = fibCol(r)
-            ln = line.new(xStart, pr, xEnd, pr, xloc = xloc.bar_time, extend = extend.right, color = fc, style = (r == 0.0 or r == 1.0) ? line.style_solid : line.style_dashed, width = 1)
+            sco = array.get(scArr, i)
+            w   = sco >= 7 ? 3 : sco >= 3 ? 2 : 1
+            fc  = sco <= 0 ? color.new(color.gray, 72) : fibCol(r)
+            ln = line.new(xStart, pr, xEnd, pr, xloc = xloc.bar_time, extend = extend.right, color = fc, style = (r == 0.0 or r == 1.0) ? line.style_solid : line.style_dashed, width = w)
             array.push(fibLn, ln)
-            lb = label.new(time, pr, str.tostring(r, "0.000") + "   " + str.tostring(pr, format.mintick), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 20), textcolor = fc, size = size.small)
+            lb = label.new(time, pr, str.tostring(r, "0.000") + "   " + str.tostring(pr, format.mintick) + "   S:" + str.tostring(sco), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 20), textcolor = fc, size = size.small)
             array.push(fibLb, lb)
         // ---- ARA DESTEK/DİRENÇ SEVİYELERİ (aynı set; daha ince, soluk, dashed) ----
         subRatios = array.from(0.118, 0.309, 0.441, 0.559, 0.702, 0.893)
@@ -167,9 +248,12 @@ if barstate.islast
         for j = 0 to array.size(subRatios) - 1
             sr = array.get(subRatios, j)
             sp = a2P + sr * (a1P - a2P)
-            sln = line.new(xStart, sp, xEnd, sp, xloc = xloc.bar_time, extend = extend.right, color = subCol, style = line.style_dashed, width = 1)
+            ssc = array.get(scArr, 7 + j)
+            sw  = ssc >= 7 ? 3 : ssc >= 3 ? 2 : 1
+            slc = ssc <= 0 ? color.new(color.gray, 78) : subCol
+            sln = line.new(xStart, sp, xEnd, sp, xloc = xloc.bar_time, extend = extend.right, color = slc, style = line.style_dashed, width = sw)
             array.push(fibLn, sln)
-            slb = label.new(time, sp, str.tostring(sr, "0.000") + "   " + str.tostring(sp, format.mintick), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 55), textcolor = subCol, size = size.tiny)
+            slb = label.new(time, sp, str.tostring(sr, "0.000") + "   " + str.tostring(sp, format.mintick) + "   S:" + str.tostring(ssc), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 55), textcolor = slc, size = size.tiny)
             array.push(fibLb, slb)
 
 // ============================================================================
@@ -187,9 +271,20 @@ legPct  = na(a1P) or na(a2P) or a1P == 0 ? na : (a2P - a1P) / a1P * 100
 legTxt  = na(legAbs) ? "-" : f_p(legAbs) + "  (" + str.tostring(legPct, "0.0") + "%)"
 thrTxt  = na(a4) ? "-" : str.tostring(k, "0.0") + " x " + f_p(a4) + " = " + f_p(k * a4)
 
+// En güçlü Fib seviyesi (score) — teşhis
+bestI = 0
+bestS = array.get(scArr, 0)
+for idx = 1 to 12
+    s = array.get(scArr, idx)
+    if s > bestS
+        bestS := s
+        bestI := idx
+bestR = array.get(allR, bestI)
+bestP = na(a1P) or na(a2P) ? na : a2P + bestR * (a1P - a2P)
+
 hd = color.new(color.black, 10)
 kb = color.new(color.black, 25)
-var table dbg = table.new(position.top_right, 2, 13, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+var table dbg = table.new(position.top_right, 2, 16, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
 if showPanel and barstate.islast
     tc(dbg, 0, 0,  "TURHAL ANCHOR",   hd)
     tc(dbg, 1, 0,  "Model B/C",       hd)
@@ -217,3 +312,9 @@ if showPanel and barstate.islast
     tc(dbg, 1, 11, thrTxt,            kb)
     tc(dbg, 0, 12, "Flip / 4H bar",   kb)
     tc(dbg, 1, 12, str.tostring(nFlip) + " / " + str.tostring(nBar4), kb)
+    tc(dbg, 0, 13, "En güçlü oran",   kb)
+    tc(dbg, 1, 13, str.tostring(bestR, "0.000"), color.new(color.blue, 40))
+    tc(dbg, 0, 14, "En güçlü fiyat",  kb)
+    tc(dbg, 1, 14, f_p(bestP),        color.new(color.blue, 40))
+    tc(dbg, 0, 15, "En yüksek Score", kb)
+    tc(dbg, 1, 15, str.tostring(bestS), color.new(bestS >= 7 ? color.green : bestS >= 3 ? #ffb300 : color.gray, 30))
