@@ -12,7 +12,7 @@
 //         State yalnızca yeni KAPANMIŞ 4H barında bir kez işlenir (newBar4 + [1]).
 //  License: MPL-2.0
 // ============================================================================
-indicator("Turhal Anchor Teşhis", "Turhal Anchor", overlay = true, max_lines_count = 20, max_labels_count = 20)
+indicator("Turhal Anchor Teşhis", "Turhal Anchor", overlay = true, max_lines_count = 40, max_labels_count = 20)
 
 // ============================================================================
 //  GİRDİLER
@@ -21,6 +21,7 @@ res       = input.timeframe("240", "Anchor Kaynak Zaman Dilimi")
 atrLen    = input.int(14, "ATR Periyodu (onay için)", minval = 1)
 k         = input.float(3.0, "DC Onay Eşiği (k x ATR)", minval = 0.1, step = 0.1)
 showPanel = input.bool(true, "Debug Panelini Göster")
+labelGapK = input.float(0.35, "Etiket Dikey Aralığı (x ATR)", minval = 0.0, step = 0.05)
 
 // ============================================================================
 //  4H ONAYLI VERİ  (lookahead_off; [1] ile yalnızca KAPANMIŞ 4H barı kullanılır)
@@ -328,6 +329,11 @@ if barstate.islast and structDir != 0 and not na(a1P) and not na(a2P) and not na
 // ============================================================================
 fibCol(float r) => r == 0.0 or r == 1.0 ? color.new(color.gray, 0) : r == 0.5 ? color.new(color.orange, 0) : (r == 0.618 or r == 0.382) ? color.new(color.teal, 0) : color.new(color.blue, 20)
 
+// ---- ETİKET YERLEŞİM EŞLEMESİ (yalnızca görsel; seviye/skor hesabına dokunmaz) ----
+// ordR = 13 oran, ORAN-SIRALI; ordI = her oranın levelScore/allR index'i (0-6 ana, 7-12 ara)
+var float[] ordR = array.from(0.0, 0.118, 0.236, 0.309, 0.382, 0.441, 0.5, 0.559, 0.618, 0.702, 0.786, 0.893, 1.0)
+var int[]   ordI = array.from(0, 7, 1, 8, 2, 9, 3, 10, 4, 11, 5, 12, 6)
+
 var line[]  fibLn = array.new_line()
 var label[] fibLb = array.new_label()
 if barstate.islast
@@ -338,31 +344,38 @@ if barstate.islast
     array.clear(fibLn)
     array.clear(fibLb)
     if structDir != 0 and not na(a1P) and not na(a2P) and not na(a1T) and not na(a2T)
-        ratios = array.from(0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0)
         xStart = a1T < a2T ? a1T : a2T
         xEnd   = a1T < a2T ? a2T : a1T
-        for i = 0 to array.size(ratios) - 1
-            r   = array.get(ratios, i)
-            pr  = a2P + r * (a1P - a2P)
-            sco = array.get(levelScore, i)
-            fc  = sco < 25 ? color.new(fibCol(r), 55) : fibCol(r)   // düşük skor: aynı renk, hafif soluk
-            lw  = sco >= 60 ? 3 : sco >= 25 ? 2 : 1
-            ln = line.new(xStart, pr, xEnd, pr, xloc = xloc.bar_time, extend = extend.right, color = fc, style = (r == 0.0 or r == 1.0) ? line.style_solid : line.style_dashed, width = lw)
+        // ---- Etiket anti-overlap: fiyat-sıralı tek geçişli greedy istifleme ----
+        // minGap = labelGapK x SON KAPANMIŞ 4H ATR (bar içinde sabit -> zıplama/repaint yok).
+        // Çizgi GERÇEK fiyatta kalır; yalnızca etiket kayar, kayan etiket connector ile bağlanır.
+        // Yukarıdan aşağı: y_i = min(fiyat_i, öncekiY - minGap) -> sıra asla bozulmaz, deterministik.
+        stATR  = array.size(hA) > 0 ? array.get(hA, array.size(hA) - 1) : a4
+        minGap = na(stATR) ? 0.0 : labelGapK * stATR
+        prevY  = float(na)
+        for kk = 0 to 12
+            s   = a1P > a2P ? 12 - kk : kk          // iterasyon daima YUKARIDAN AŞAĞI fiyat sırasında
+            rr  = array.get(ordR, s)
+            li  = array.get(ordI, s)
+            pr  = a2P + rr * (a1P - a2P)
+            sco = array.get(levelScore, li)
+            isMain = li < 7
+            fc = isMain ? (sco < 25 ? color.new(fibCol(rr), 55) : fibCol(rr)) : (sco < 25 ? color.new(color.gray, 70) : color.new(color.gray, 45))
+            lw = sco >= 60 ? 3 : sco >= 25 ? 2 : 1
+            // seviye çizgisi HER ZAMAN gerçek Fib fiyatında
+            ln = line.new(xStart, pr, xEnd, pr, xloc = xloc.bar_time, extend = extend.right, color = fc, style = isMain and (rr == 0.0 or rr == 1.0) ? line.style_solid : line.style_dashed, width = lw)
             array.push(fibLn, ln)
-            lb = label.new(time, pr, str.tostring(r, "0.000") + " | " + str.tostring(pr, format.mintick) + " | H2:" + str.tostring(sco), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 20), textcolor = fc, size = size.small)
+            // etiket yerleşimi: çakışıyorsa minGap kadar aşağı it
+            y = pr
+            if not na(prevY) and minGap > 0 and y > prevY - minGap
+                y := prevY - minGap
+            prevY := y
+            // etiket gerçek seviyeden kaydıysa ince connector çiz
+            if math.abs(y - pr) > syminfo.mintick
+                cn = line.new(time, pr, time, y, xloc = xloc.bar_time, color = color.new(color.gray, 55), style = line.style_dotted, width = 1)
+                array.push(fibLn, cn)
+            lb = label.new(time, y, str.tostring(rr, "0.000") + " | " + str.tostring(pr, format.mintick) + " | H2:" + str.tostring(sco), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, isMain ? 20 : 55), textcolor = fc, size = isMain ? size.small : size.tiny)
             array.push(fibLb, lb)
-        // ---- ARA DESTEK/DİRENÇ SEVİYELERİ (aynı set; daha ince, soluk, dashed) ----
-        subRatios = array.from(0.118, 0.309, 0.441, 0.559, 0.702, 0.893)
-        for j = 0 to array.size(subRatios) - 1
-            sr  = array.get(subRatios, j)
-            sp  = a2P + sr * (a1P - a2P)
-            ssc = array.get(levelScore, 7 + j)
-            sfc = ssc < 25 ? color.new(color.gray, 70) : color.new(color.gray, 45)  // gri kimlik korunur
-            slw = ssc >= 60 ? 3 : ssc >= 25 ? 2 : 1
-            sln = line.new(xStart, sp, xEnd, sp, xloc = xloc.bar_time, extend = extend.right, color = sfc, style = line.style_dashed, width = slw)
-            array.push(fibLn, sln)
-            slb = label.new(time, sp, str.tostring(sr, "0.000") + " | " + str.tostring(sp, format.mintick) + " | H2:" + str.tostring(ssc), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 55), textcolor = sfc, size = size.tiny)
-            array.push(fibLb, slb)
 
 // ============================================================================
 //  DEBUG PANELİ
