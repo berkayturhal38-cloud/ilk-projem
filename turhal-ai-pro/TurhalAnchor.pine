@@ -55,7 +55,7 @@ var int   nBar4 = 0
 // Seviye sırası: 0-6 ana [0,0.236,0.382,0.5,0.618,0.786,1], 7-12 ara [0.118,0.309,0.441,0.559,0.702,0.893]
 var float[] allR       = array.from(0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0, 0.118, 0.309, 0.441, 0.559, 0.702, 0.893)
 var int[]   levelScore = array.new_int(13, 0)    // 0-100 Strength Score (her recompute'ta yeniden)
-// Kapalı 4H geçmişi (A2->now full recompute için; cap 400)
+// Kapalı 4H geçmişi (A1->now full recompute için; cap 400)
 var float[] hH = array.new_float()
 var float[] hL = array.new_float()
 var float[] hC = array.new_float()
@@ -127,7 +127,7 @@ if newBar4
         a2P := L4
         a2T := T4
 
-    // ---- H3: kapanmış 4H barını geçmişe ekle (cap 400; A2->now recompute için) ----
+    // ---- H3: kapanmış 4H barını geçmişe ekle (cap 400; A1->now recompute için) ----
     array.push(hH, H4)
     array.push(hL, L4)
     array.push(hC, C4)
@@ -158,8 +158,10 @@ if barstate.islast
 
 // ============================================================================
 //  H3 HISTORICAL REACTION SCAN  (görsel/teşhis; anchor motoruna KATILMAZ)
-//  Pencere: A2 -> son KAPANMIŞ 4H bar. Her hesap FULL RECOMPUTE (saklama/sıfırlama yok);
-//  A2 uzadığında pencere otomatik daralır, skorlar güncel A2/Fib fiyatlarıyla yeniden çıkar.
+//  Pencere: A1 -> son KAPANMIŞ 4H bar. Her hesap FULL RECOMPUTE (saklama/sıfırlama yok);
+//  A2 uzadığında skorlar güncel A2/Fib fiyatlarıyla yeniden çıkar; impuls fazı da taranır.
+//  NOT: İmpuls tek yönlü geçişleri FSM zaten ödüllendirmez (karşı tarafa kapanış =
+//  FAILED_BREAK cezası); episode kuralları değişmedi, yalnızca pencere başlangıcı A1 oldu.
 //  FSM (seviye başına): OUT -> IN_ZONE -> REACTION_TRACKING -> REARM
 //  MFE   : izleme penceresi max 10 kapanmış 4H bar, yaklaşım yönünde en iyi hareket.
 //  q     : min(MFE / episodeATR, 2.0) / 2.0  (episodeATR = zona giriş barındaki ATR)
@@ -167,10 +169,10 @@ if barstate.islast
 //  Score : round(100 * (1 - exp(-max(RAW,0)/2.5)))  -> 0-100, doygunlaşan
 //  Yalnızca kapanmış 4H mumlar (hH/hL/hC/hA/hT); lookahead yok, repaint yok.
 // ============================================================================
-if barstate.islast and structDir != 0 and not na(a1P) and not na(a2P) and not na(a2T) and array.size(hT) > 0
+if barstate.islast and structDir != 0 and not na(a1P) and not na(a2P) and not na(a1T) and array.size(hT) > 0
     nHist   = array.size(hT)
     nowT    = array.get(hT, nHist - 1)
-    span    = math.max(nowT - a2T, 1)
+    span    = math.max(nowT - a1T, 1)
     legAbs2 = math.abs(a1P - a2P)
     curATR  = array.get(hA, nHist - 1)
     z       = na(curATR) ? 0.025 * legAbs2 : math.min(0.35 * curATR, 0.025 * legAbs2)
@@ -191,8 +193,8 @@ if barstate.islast and structDir != 0 and not na(a1P) and not na(a2P) and not na
             bC = array.get(hC, b)
             bA = array.get(hA, b)
             bT = array.get(hT, b)
-            if bT >= a2T
-                w        = 0.4 + 0.6 * math.max(0.0, math.min(1.0, (bT - a2T) / span))
+            if bT >= a1T
+                w        = 0.4 + 0.6 * math.max(0.0, math.min(1.0, (bT - a1T) / span))
                 inZone   = bL <= Lv + z and bH >= Lv - z
                 brokeOpp = appr == 1 ? bC < Lv - z : appr == -1 ? bC > Lv + z : false
                 if st == 0
