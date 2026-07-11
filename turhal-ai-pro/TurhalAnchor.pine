@@ -51,11 +51,11 @@ var int   a2T = na
 var int   nFlip = 0
 var int   nBar4 = 0
 
-// ---- H3 HISTORICAL REACTION SCAN durumu (görsel/teşhis; motora KATILMAZ) ----
+// ---- H2 PIVOT-CONFLUENCE DENSITY SCAN durumu (görsel/teşhis; motora KATILMAZ) ----
 // Seviye sırası: 0-6 ana [0,0.236,0.382,0.5,0.618,0.786,1], 7-12 ara [0.118,0.309,0.441,0.559,0.702,0.893]
 var float[] allR       = array.from(0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0, 0.118, 0.309, 0.441, 0.559, 0.702, 0.893)
-var int[]   levelScore = array.new_int(13, 0)    // 0-100 Strength Score (her recompute'ta yeniden)
-// Kapalı 4H geçmişi (A1->now full recompute için; cap 400)
+var int[]   levelScore = array.new_int(13, 0)    // 0-100 H2 Score (her recompute'ta yeniden)
+// Kapalı 4H geçmişi (A1->now full recompute için; cap 500)
 var float[] hH = array.new_float()
 var float[] hL = array.new_float()
 var float[] hC = array.new_float()
@@ -127,13 +127,13 @@ if newBar4
         a2P := L4
         a2T := T4
 
-    // ---- H3: kapanmış 4H barını geçmişe ekle (cap 400; A1->now recompute için) ----
+    // ---- H2: kapanmış 4H barını geçmişe ekle (cap 500; A1->now recompute için) ----
     array.push(hH, H4)
     array.push(hL, L4)
     array.push(hC, C4)
     array.push(hA, A4)
     array.push(hT, T4)
-    if array.size(hT) > 400
+    if array.size(hT) > 500
         array.shift(hH)
         array.shift(hL)
         array.shift(hC)
@@ -157,16 +157,21 @@ if barstate.islast
         a2Lb := label.new(a2T, a2P, "A2  " + str.tostring(a2P, format.mintick), xloc = xloc.bar_time, style = structDir == 1 ? label.style_label_down : label.style_label_up, color = col, textcolor = color.white, size = size.small)
 
 // ============================================================================
-//  H3 HISTORICAL REACTION SCAN  (görsel/teşhis; anchor motoruna KATILMAZ)
-//  Pencere: A1 -> son KAPANMIŞ 4H bar. Her hesap FULL RECOMPUTE (saklama/sıfırlama yok);
-//  A2 uzadığında skorlar güncel A2/Fib fiyatlarıyla yeniden çıkar; impuls fazı da taranır.
-//  NOT: İmpuls tek yönlü geçişleri FSM zaten ödüllendirmez (karşı tarafa kapanış =
-//  FAILED_BREAK cezası); episode kuralları değişmedi, yalnızca pencere başlangıcı A1 oldu.
-//  FSM (seviye başına): OUT -> IN_ZONE -> REACTION_TRACKING -> REARM
-//  MFE   : izleme penceresi max 10 kapanmış 4H bar, yaklaşım yönünde en iyi hareket.
-//  q     : min(MFE / episodeATR, 2.0) / 2.0  (episodeATR = zona giriş barındaki ATR)
-//  w     : 0.4 + 0.6 * recency (A2'ye yakın barlar hafif, yeni barlar ağır)
-//  Score : round(100 * (1 - exp(-max(RAW,0)/2.5)))  -> 0-100, doygunlaşan
+//  H2 — PIVOT-CONFLUENCE DENSITY SCAN v1  (görsel/teşhis; anchor motoruna KATILMAZ)
+//  PRENSİP: Güçlü Fib seviyesi = çevresinde ONAYLI swing dönüşü oluşmuş ve fiyatın
+//  sonrasında anlamlı displacement yaptığı seviyedir. Temas/mum sayımı YOK.
+//  Pencere: A1 -> son KAPANMIŞ 4H bar (buffer max 500). Her hesap FULL RECOMPUTE;
+//  A1/A2 değişince eski skor taşınmaz, güncel Fib geometrisiyle geçmiş yeniden taranır.
+//  PIVOT: volatilite-adaptif onay — lokal ekstrem, sonrasında >= 1.0 x pivotATR ters
+//  yönlü displacement (4H close) gerçekleşince CONFIRMED. Gelecek veri yok.
+//  KALİTE: q = strength * (0.5 + 0.5*proximity) * recency
+//    strength  = min(maxExcursion / pivotATR, 3) / 3   (0-1, displacement ana faktör)
+//    proximity = 1 - min(|pivot - Lv| / zoneHalf, 1)   (0-1, çizgiye yakın daha değerli)
+//    recency   = 0.4 + 0.6 * normalizedTime            (A1 civarı ~0.4, güncel ~1.0)
+//  zoneHalf = min(0.35*pivotATR, 0.025*|A2-A1|). Dedup: aynı seviyede 6 kapanmış 4H
+//  bardan yakın pivotlarda yalnızca büyük displacement kazanır. Seviye başına en
+//  kaliteli 5 q toplanır: Score = round(100*(1-exp(-RAW/1.8))).
+//  Ceza / acceptance / touch / volume / trend / sinyal YOK (v1 yalnızca dönüş kalitesi).
 //  Yalnızca kapanmış 4H mumlar (hH/hL/hC/hA/hT); lookahead yok, repaint yok.
 // ============================================================================
 if barstate.islast and structDir != 0 and not na(a1P) and not na(a2P) and not na(a1T) and array.size(hT) > 0
@@ -174,64 +179,146 @@ if barstate.islast and structDir != 0 and not na(a1P) and not na(a2P) and not na
     nowT    = array.get(hT, nHist - 1)
     span    = math.max(nowT - a1T, 1)
     legAbs2 = math.abs(a1P - a2P)
-    curATR  = array.get(hA, nHist - 1)
-    z       = na(curATR) ? 0.025 * legAbs2 : math.min(0.35 * curATR, 0.025 * legAbs2)
-    for idx = 0 to 12
-        rr    = array.get(allR, idx)
-        Lv    = a2P + rr * (a1P - a2P)
-        raw   = 0.0
-        st    = 0          // 0=OUT, 1=IN_ZONE, 2=REACTION_TRACKING, 3=REARM
-        appr  = 0          // +1 = üstten yaklaştı (destek testi), -1 = alttan (direnç testi)
-        epATR = float(na)  // episode ATR (zona giriş barındaki ATR)
-        dwell = 0
-        mfe   = 0.0
-        trkN  = 0
-        prevC = float(na)
-        for b = 0 to nHist - 1
+
+    // ---- 1) Onaylı pivot tespiti (alternating HIGH/LOW; 1.0 x pivotATR onayı) ----
+    pvP  = array.new_float()   // pivot fiyat
+    pvT  = array.new_int()     // pivot zaman
+    pvB  = array.new_int()     // pivot buffer index (6-bar dedup için)
+    pvA  = array.new_float()   // pivot barındaki ATR (pivotATR)
+    pvTy = array.new_int()     // +1 = HIGH, -1 = LOW
+    int   pMode = 0            // 0 = başlatılmadı, +1 = HIGH arıyor, -1 = LOW arıyor
+    float pHi   = na
+    int   pHiB  = 0
+    int   pHiT  = 0
+    float pHiA  = na
+    float pLo   = na
+    int   pLoB  = 0
+    int   pLoT  = 0
+    float pLoA  = na
+    for b = 0 to nHist - 1
+        bT = array.get(hT, b)
+        if bT >= a1T
             bH = array.get(hH, b)
             bL = array.get(hL, b)
             bC = array.get(hC, b)
             bA = array.get(hA, b)
-            bT = array.get(hT, b)
-            if bT >= a1T
-                w        = 0.4 + 0.6 * math.max(0.0, math.min(1.0, (bT - a1T) / span))
-                inZone   = bL <= Lv + z and bH >= Lv - z
-                brokeOpp = appr == 1 ? bC < Lv - z : appr == -1 ? bC > Lv + z : false
-                if st == 0
-                    if inZone and not na(prevC) and prevC != Lv
-                        st    := 1
-                        appr  := prevC > Lv ? 1 : -1
-                        epATR := bA
-                        dwell := 1
-                else if st == 1
-                    if brokeOpp                      // FAILED_BREAK: karşı tarafa kapanış
-                        raw := raw - 0.3 * w
-                        st  := 3
-                    else if not inZone               // zondan yaklaşım tarafına çıktı -> tepki izle
-                        st   := 2
-                        mfe  := appr == 1 ? bH - Lv : Lv - bL
-                        trkN := 1
-                    else                             // zonda bekliyor
-                        dwell := dwell + 1
-                        if dwell > 4                 // ACCEPTANCE: seviye emiyor, S/R değil
-                            raw := raw - 0.5 * w
-                            st  := 3
-                else if st == 2
-                    mfe  := math.max(mfe, appr == 1 ? bH - Lv : Lv - bL)
-                    trkN := trkN + 1
-                    if brokeOpp                      // tepki karşı kırılımla bitti -> başarısız
-                        raw := raw - 0.3 * w
-                        st  := 3
-                    else if inZone or trkN >= 10     // tepki tamam: zona döndü veya 10 bar doldu
-                        q = na(epATR) or epATR <= 0 ? 0.0 : math.min(mfe / epATR, 2.0) / 2.0
-                        raw := raw + q * w
-                        st  := 3
-                else                                 // REARM: seviyeden yeterince uzaklaşmalı
-                    if math.abs(bC - Lv) >= z + (na(epATR) ? 0.0 : 0.5 * epATR)
-                        st   := 0
-                        appr := 0
-            prevC := bC
-        array.set(levelScore, idx, math.round(100 * (1 - math.exp(-math.max(raw, 0) / 2.5))))
+            if pMode == 0
+                if na(pHi) or bH > pHi
+                    pHi := bH
+                    pHiB := b
+                    pHiT := bT
+                    pHiA := bA
+                if na(pLo) or bL < pLo
+                    pLo := bL
+                    pLoB := b
+                    pLoT := bT
+                    pLoA := bA
+                if not na(pHiA) and bC <= pHi - pHiA
+                    array.push(pvP, pHi)
+                    array.push(pvT, pHiT)
+                    array.push(pvB, pHiB)
+                    array.push(pvA, pHiA)
+                    array.push(pvTy, 1)
+                    pMode := -1
+                    pLo := bL
+                    pLoB := b
+                    pLoT := bT
+                    pLoA := bA
+                else if not na(pLoA) and bC >= pLo + pLoA
+                    array.push(pvP, pLo)
+                    array.push(pvT, pLoT)
+                    array.push(pvB, pLoB)
+                    array.push(pvA, pLoA)
+                    array.push(pvTy, -1)
+                    pMode := 1
+                    pHi := bH
+                    pHiB := b
+                    pHiT := bT
+                    pHiA := bA
+            else if pMode == 1                       // HIGH adayı izleniyor
+                if bH > pHi
+                    pHi := bH
+                    pHiB := b
+                    pHiT := bT
+                    pHiA := bA
+                if not na(pHiA) and bC <= pHi - pHiA // 1.0 x ATR aşağı displacement -> CONFIRMED
+                    array.push(pvP, pHi)
+                    array.push(pvT, pHiT)
+                    array.push(pvB, pHiB)
+                    array.push(pvA, pHiA)
+                    array.push(pvTy, 1)
+                    pMode := -1
+                    pLo := bL
+                    pLoB := b
+                    pLoT := bT
+                    pLoA := bA
+            else                                     // LOW adayı izleniyor
+                if bL < pLo
+                    pLo := bL
+                    pLoB := b
+                    pLoT := bT
+                    pLoA := bA
+                if not na(pLoA) and bC >= pLo + pLoA // 1.0 x ATR yukarı displacement -> CONFIRMED
+                    array.push(pvP, pLo)
+                    array.push(pvT, pLoT)
+                    array.push(pvB, pLoB)
+                    array.push(pvA, pLoA)
+                    array.push(pvTy, -1)
+                    pMode := 1
+                    pHi := bH
+                    pHiB := b
+                    pHiT := bT
+                    pHiA := bA
+
+    // ---- 2) Pivot başına maxExcursion (alternating: sonraki karşı pivota kadar) ----
+    nPv = array.size(pvP)
+    pvE = array.new_float()
+    if nPv > 0
+        for j = 0 to nPv - 1
+            e = 0.0
+            if j < nPv - 1
+                e := math.abs(array.get(pvP, j) - array.get(pvP, j + 1))
+            else
+                // son pivot: pencere sonuna kadarki karşı yönlü koşu (running ekstrem)
+                e := array.get(pvTy, j) == 1 ? (na(pLo) ? 0.0 : array.get(pvP, j) - pLo) : (na(pHi) ? 0.0 : pHi - array.get(pvP, j))
+            array.push(pvE, math.max(e, 0.0))
+
+    // ---- 3) Seviye başına confluence: dedup (6 bar) + top-5 q + 0-100 Score ----
+    for idx = 0 to 12
+        rr = array.get(allR, idx)
+        Lv = a2P + rr * (a1P - a2P)
+        qArr  = array.new_float()
+        lastB = -999               // bu seviyede kabul edilen son pivotun buffer index'i
+        lastD = -1.0               // ve displacement'ı (dedup: büyük olan kazanır)
+        if nPv > 0
+            for j = 0 to nPv - 1
+                pAtr = array.get(pvA, j)
+                if not na(pAtr) and pAtr > 0
+                    zHalf = math.min(0.35 * pAtr, 0.025 * legAbs2)
+                    dist  = math.abs(array.get(pvP, j) - Lv)
+                    if zHalf > 0 and dist <= zHalf
+                        exc      = array.get(pvE, j)
+                        dispATR  = math.min(exc / pAtr, 3.0)
+                        strength = dispATR / 3.0
+                        prox     = 1.0 - math.min(dist / zHalf, 1.0)
+                        rec      = 0.4 + 0.6 * math.max(0.0, math.min(1.0, (array.get(pvT, j) - a1T) / span))
+                        q        = strength * (0.5 + 0.5 * prox) * rec
+                        if array.size(qArr) > 0 and array.get(pvB, j) - lastB < 6
+                            if dispATR > lastD     // 6 bardan yakın: büyük displacement kazanır
+                                array.set(qArr, array.size(qArr) - 1, q)
+                                lastB := array.get(pvB, j)
+                                lastD := dispATR
+                        else
+                            array.push(qArr, q)
+                            lastB := array.get(pvB, j)
+                            lastD := dispATR
+        raw = 0.0
+        nq  = array.size(qArr)
+        if nq > 0
+            array.sort(qArr, order.descending)     // en kaliteli 5 pivot
+            for m = 0 to math.min(4, nq - 1)
+                raw := raw + array.get(qArr, m)
+        array.set(levelScore, idx, math.round(100 * (1 - math.exp(-raw / 1.8))))
 
 // ============================================================================
 //  GÖRSEL FIBONACCI SETİ  (yalnızca teşhis; a1P/a2P motoruna DOKUNMAZ)
@@ -258,24 +345,23 @@ if barstate.islast
             r   = array.get(ratios, i)
             pr  = a2P + r * (a1P - a2P)
             sco = array.get(levelScore, i)
-            fc  = sco < 10 ? color.new(color.gray, 75) : fibCol(r)
-            lw  = sco > 60 ? 3 : sco > 25 ? 2 : 1
+            fc  = sco < 25 ? color.new(fibCol(r), 55) : fibCol(r)   // düşük skor: aynı renk, hafif soluk
+            lw  = sco >= 60 ? 3 : sco >= 25 ? 2 : 1
             ln = line.new(xStart, pr, xEnd, pr, xloc = xloc.bar_time, extend = extend.right, color = fc, style = (r == 0.0 or r == 1.0) ? line.style_solid : line.style_dashed, width = lw)
             array.push(fibLn, ln)
-            lb = label.new(time, pr, str.tostring(r, "0.000") + "   " + str.tostring(pr, format.mintick) + "   S:" + str.tostring(sco), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 20), textcolor = fc, size = size.small)
+            lb = label.new(time, pr, str.tostring(r, "0.000") + " | " + str.tostring(pr, format.mintick) + " | H2:" + str.tostring(sco), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 20), textcolor = fc, size = size.small)
             array.push(fibLb, lb)
         // ---- ARA DESTEK/DİRENÇ SEVİYELERİ (aynı set; daha ince, soluk, dashed) ----
         subRatios = array.from(0.118, 0.309, 0.441, 0.559, 0.702, 0.893)
-        subCol = color.new(color.gray, 60)
         for j = 0 to array.size(subRatios) - 1
             sr  = array.get(subRatios, j)
             sp  = a2P + sr * (a1P - a2P)
             ssc = array.get(levelScore, 7 + j)
-            sfc = ssc < 10 ? color.new(color.gray, 80) : color.new(color.gray, 35)
-            slw = ssc > 60 ? 3 : ssc > 25 ? 2 : 1
+            sfc = ssc < 25 ? color.new(color.gray, 70) : color.new(color.gray, 45)  // gri kimlik korunur
+            slw = ssc >= 60 ? 3 : ssc >= 25 ? 2 : 1
             sln = line.new(xStart, sp, xEnd, sp, xloc = xloc.bar_time, extend = extend.right, color = sfc, style = line.style_dashed, width = slw)
             array.push(fibLn, sln)
-            slb = label.new(time, sp, str.tostring(sr, "0.000") + "   " + str.tostring(sp, format.mintick) + "   S:" + str.tostring(ssc), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 55), textcolor = sfc, size = size.tiny)
+            slb = label.new(time, sp, str.tostring(sr, "0.000") + " | " + str.tostring(sp, format.mintick) + " | H2:" + str.tostring(ssc), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 55), textcolor = sfc, size = size.tiny)
             array.push(fibLb, slb)
 
 // ============================================================================
@@ -293,7 +379,7 @@ legPct  = na(a1P) or na(a2P) or a1P == 0 ? na : (a2P - a1P) / a1P * 100
 legTxt  = na(legAbs) ? "-" : f_p(legAbs) + "  (" + str.tostring(legPct, "0.0") + "%)"
 thrTxt  = na(a4) ? "-" : str.tostring(k, "0.0") + " x " + f_p(a4) + " = " + f_p(k * a4)
 
-// H3: en güçlü seviye (panel için; yalnızca okuma)
+// H2: en güçlü seviye (panel için; yalnızca okuma)
 bestI = 0
 bestS = -1
 for i2 = 0 to 12
@@ -334,9 +420,9 @@ if showPanel and barstate.islast
     tc(dbg, 1, 11, thrTxt,            kb)
     tc(dbg, 0, 12, "Flip / 4H bar",   kb)
     tc(dbg, 1, 12, str.tostring(nFlip) + " / " + str.tostring(nBar4), kb)
-    tc(dbg, 0, 13, "En güçlü oran",   kb)
+    tc(dbg, 0, 13, "En güçlü H2 oran",  kb)
     tc(dbg, 1, 13, structDir == 0 ? "-" : str.tostring(bestR, "0.000"), color.new(color.purple, 40))
-    tc(dbg, 0, 14, "En güçlü fiyat",  kb)
+    tc(dbg, 0, 14, "En güçlü H2 fiyat", kb)
     tc(dbg, 1, 14, structDir == 0 ? "-" : f_p(bestP), color.new(color.purple, 40))
-    tc(dbg, 0, 15, "En güçlü Score",  kb)
-    tc(dbg, 1, 15, structDir == 0 ? "-" : str.tostring(bestS) + " / 100", color.new(bestS > 60 ? color.green : bestS > 25 ? color.orange : color.gray, 40))
+    tc(dbg, 0, 15, "En yüksek H2 Score", kb)
+    tc(dbg, 1, 15, structDir == 0 ? "-" : str.tostring(bestS) + " / 100", color.new(bestS >= 60 ? color.green : bestS >= 25 ? color.orange : color.gray, 40))
