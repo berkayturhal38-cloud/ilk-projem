@@ -51,6 +51,17 @@ var int   a2T = na
 var int   nFlip = 0
 var int   nBar4 = 0
 
+// ---- H3 HISTORICAL REACTION SCAN durumu (görsel/teşhis; motora KATILMAZ) ----
+// Seviye sırası: 0-6 ana [0,0.236,0.382,0.5,0.618,0.786,1], 7-12 ara [0.118,0.309,0.441,0.559,0.702,0.893]
+var float[] allR       = array.from(0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0, 0.118, 0.309, 0.441, 0.559, 0.702, 0.893)
+var int[]   levelScore = array.new_int(13, 0)    // 0-100 Strength Score (her recompute'ta yeniden)
+// Kapalı 4H geçmişi (A2->now full recompute için; cap 400)
+var float[] hH = array.new_float()
+var float[] hL = array.new_float()
+var float[] hC = array.new_float()
+var float[] hA = array.new_float()
+var int[]   hT = array.new_int()
+
 // ============================================================================
 //  STATE MACHINE  (yalnızca kapanmış 4H barında, bir kez)
 // ============================================================================
@@ -116,6 +127,19 @@ if newBar4
         a2P := L4
         a2T := T4
 
+    // ---- H3: kapanmış 4H barını geçmişe ekle (cap 400; A2->now recompute için) ----
+    array.push(hH, H4)
+    array.push(hL, L4)
+    array.push(hC, C4)
+    array.push(hA, A4)
+    array.push(hT, T4)
+    if array.size(hT) > 400
+        array.shift(hH)
+        array.shift(hL)
+        array.shift(hC)
+        array.shift(hA)
+        array.shift(hT)
+
 // ============================================================================
 //  ÇİZİM  (yalnızca A1, A2 ve aralarındaki çizgi — son barda güncellenir)
 // ============================================================================
@@ -131,6 +155,81 @@ if barstate.islast
         legLn := line.new(a1T, a1P, a2T, a2P, xloc = xloc.bar_time, color = col, width = 2)
         a1Lb := label.new(a1T, a1P, "A1  " + str.tostring(a1P, format.mintick), xloc = xloc.bar_time, style = structDir == 1 ? label.style_label_up : label.style_label_down, color = color.new(color.gray, 15), textcolor = color.white, size = size.small)
         a2Lb := label.new(a2T, a2P, "A2  " + str.tostring(a2P, format.mintick), xloc = xloc.bar_time, style = structDir == 1 ? label.style_label_down : label.style_label_up, color = col, textcolor = color.white, size = size.small)
+
+// ============================================================================
+//  H3 HISTORICAL REACTION SCAN  (görsel/teşhis; anchor motoruna KATILMAZ)
+//  Pencere: A2 -> son KAPANMIŞ 4H bar. Her hesap FULL RECOMPUTE (saklama/sıfırlama yok);
+//  A2 uzadığında pencere otomatik daralır, skorlar güncel A2/Fib fiyatlarıyla yeniden çıkar.
+//  FSM (seviye başına): OUT -> IN_ZONE -> REACTION_TRACKING -> REARM
+//  MFE   : izleme penceresi max 10 kapanmış 4H bar, yaklaşım yönünde en iyi hareket.
+//  q     : min(MFE / episodeATR, 2.0) / 2.0  (episodeATR = zona giriş barındaki ATR)
+//  w     : 0.4 + 0.6 * recency (A2'ye yakın barlar hafif, yeni barlar ağır)
+//  Score : round(100 * (1 - exp(-max(RAW,0)/2.5)))  -> 0-100, doygunlaşan
+//  Yalnızca kapanmış 4H mumlar (hH/hL/hC/hA/hT); lookahead yok, repaint yok.
+// ============================================================================
+if barstate.islast and structDir != 0 and not na(a1P) and not na(a2P) and not na(a2T) and array.size(hT) > 0
+    nHist   = array.size(hT)
+    nowT    = array.get(hT, nHist - 1)
+    span    = math.max(nowT - a2T, 1)
+    legAbs2 = math.abs(a1P - a2P)
+    curATR  = array.get(hA, nHist - 1)
+    z       = na(curATR) ? 0.025 * legAbs2 : math.min(0.35 * curATR, 0.025 * legAbs2)
+    for idx = 0 to 12
+        rr    = array.get(allR, idx)
+        Lv    = a2P + rr * (a1P - a2P)
+        raw   = 0.0
+        st    = 0          // 0=OUT, 1=IN_ZONE, 2=REACTION_TRACKING, 3=REARM
+        appr  = 0          // +1 = üstten yaklaştı (destek testi), -1 = alttan (direnç testi)
+        epATR = float(na)  // episode ATR (zona giriş barındaki ATR)
+        dwell = 0
+        mfe   = 0.0
+        trkN  = 0
+        prevC = float(na)
+        for b = 0 to nHist - 1
+            bH = array.get(hH, b)
+            bL = array.get(hL, b)
+            bC = array.get(hC, b)
+            bA = array.get(hA, b)
+            bT = array.get(hT, b)
+            if bT >= a2T
+                w        = 0.4 + 0.6 * math.max(0.0, math.min(1.0, (bT - a2T) / span))
+                inZone   = bL <= Lv + z and bH >= Lv - z
+                brokeOpp = appr == 1 ? bC < Lv - z : appr == -1 ? bC > Lv + z : false
+                if st == 0
+                    if inZone and not na(prevC) and prevC != Lv
+                        st    := 1
+                        appr  := prevC > Lv ? 1 : -1
+                        epATR := bA
+                        dwell := 1
+                else if st == 1
+                    if brokeOpp                      // FAILED_BREAK: karşı tarafa kapanış
+                        raw := raw - 0.3 * w
+                        st  := 3
+                    else if not inZone               // zondan yaklaşım tarafına çıktı -> tepki izle
+                        st   := 2
+                        mfe  := appr == 1 ? bH - Lv : Lv - bL
+                        trkN := 1
+                    else                             // zonda bekliyor
+                        dwell := dwell + 1
+                        if dwell > 4                 // ACCEPTANCE: seviye emiyor, S/R değil
+                            raw := raw - 0.5 * w
+                            st  := 3
+                else if st == 2
+                    mfe  := math.max(mfe, appr == 1 ? bH - Lv : Lv - bL)
+                    trkN := trkN + 1
+                    if brokeOpp                      // tepki karşı kırılımla bitti -> başarısız
+                        raw := raw - 0.3 * w
+                        st  := 3
+                    else if inZone or trkN >= 10     // tepki tamam: zona döndü veya 10 bar doldu
+                        q = na(epATR) or epATR <= 0 ? 0.0 : math.min(mfe / epATR, 2.0) / 2.0
+                        raw := raw + q * w
+                        st  := 3
+                else                                 // REARM: seviyeden yeterince uzaklaşmalı
+                    if math.abs(bC - Lv) >= z + (na(epATR) ? 0.0 : 0.5 * epATR)
+                        st   := 0
+                        appr := 0
+            prevC := bC
+        array.set(levelScore, idx, math.round(100 * (1 - math.exp(-math.max(raw, 0) / 2.5))))
 
 // ============================================================================
 //  GÖRSEL FIBONACCI SETİ  (yalnızca teşhis; a1P/a2P motoruna DOKUNMAZ)
@@ -154,22 +253,27 @@ if barstate.islast
         xStart = a1T < a2T ? a1T : a2T
         xEnd   = a1T < a2T ? a2T : a1T
         for i = 0 to array.size(ratios) - 1
-            r  = array.get(ratios, i)
-            pr = a2P + r * (a1P - a2P)
-            fc = fibCol(r)
-            ln = line.new(xStart, pr, xEnd, pr, xloc = xloc.bar_time, extend = extend.right, color = fc, style = (r == 0.0 or r == 1.0) ? line.style_solid : line.style_dashed, width = 1)
+            r   = array.get(ratios, i)
+            pr  = a2P + r * (a1P - a2P)
+            sco = array.get(levelScore, i)
+            fc  = sco < 10 ? color.new(color.gray, 75) : fibCol(r)
+            lw  = sco > 60 ? 3 : sco > 25 ? 2 : 1
+            ln = line.new(xStart, pr, xEnd, pr, xloc = xloc.bar_time, extend = extend.right, color = fc, style = (r == 0.0 or r == 1.0) ? line.style_solid : line.style_dashed, width = lw)
             array.push(fibLn, ln)
-            lb = label.new(time, pr, str.tostring(r, "0.000") + "   " + str.tostring(pr, format.mintick), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 20), textcolor = fc, size = size.small)
+            lb = label.new(time, pr, str.tostring(r, "0.000") + "   " + str.tostring(pr, format.mintick) + "   S:" + str.tostring(sco), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 20), textcolor = fc, size = size.small)
             array.push(fibLb, lb)
         // ---- ARA DESTEK/DİRENÇ SEVİYELERİ (aynı set; daha ince, soluk, dashed) ----
         subRatios = array.from(0.118, 0.309, 0.441, 0.559, 0.702, 0.893)
         subCol = color.new(color.gray, 60)
         for j = 0 to array.size(subRatios) - 1
-            sr = array.get(subRatios, j)
-            sp = a2P + sr * (a1P - a2P)
-            sln = line.new(xStart, sp, xEnd, sp, xloc = xloc.bar_time, extend = extend.right, color = subCol, style = line.style_dashed, width = 1)
+            sr  = array.get(subRatios, j)
+            sp  = a2P + sr * (a1P - a2P)
+            ssc = array.get(levelScore, 7 + j)
+            sfc = ssc < 10 ? color.new(color.gray, 80) : color.new(color.gray, 35)
+            slw = ssc > 60 ? 3 : ssc > 25 ? 2 : 1
+            sln = line.new(xStart, sp, xEnd, sp, xloc = xloc.bar_time, extend = extend.right, color = sfc, style = line.style_dashed, width = slw)
             array.push(fibLn, sln)
-            slb = label.new(time, sp, str.tostring(sr, "0.000") + "   " + str.tostring(sp, format.mintick), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 55), textcolor = subCol, size = size.tiny)
+            slb = label.new(time, sp, str.tostring(sr, "0.000") + "   " + str.tostring(sp, format.mintick) + "   S:" + str.tostring(ssc), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(color.black, 55), textcolor = sfc, size = size.tiny)
             array.push(fibLb, slb)
 
 // ============================================================================
@@ -187,9 +291,20 @@ legPct  = na(a1P) or na(a2P) or a1P == 0 ? na : (a2P - a1P) / a1P * 100
 legTxt  = na(legAbs) ? "-" : f_p(legAbs) + "  (" + str.tostring(legPct, "0.0") + "%)"
 thrTxt  = na(a4) ? "-" : str.tostring(k, "0.0") + " x " + f_p(a4) + " = " + f_p(k * a4)
 
+// H3: en güçlü seviye (panel için; yalnızca okuma)
+bestI = 0
+bestS = -1
+for i2 = 0 to 12
+    s2 = array.get(levelScore, i2)
+    if s2 > bestS
+        bestS := s2
+        bestI := i2
+bestR = array.get(allR, bestI)
+bestP = na(a1P) or na(a2P) ? na : a2P + bestR * (a1P - a2P)
+
 hd = color.new(color.black, 10)
 kb = color.new(color.black, 25)
-var table dbg = table.new(position.top_right, 2, 13, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+var table dbg = table.new(position.top_right, 2, 16, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
 if showPanel and barstate.islast
     tc(dbg, 0, 0,  "TURHAL ANCHOR",   hd)
     tc(dbg, 1, 0,  "Model B/C",       hd)
@@ -217,3 +332,9 @@ if showPanel and barstate.islast
     tc(dbg, 1, 11, thrTxt,            kb)
     tc(dbg, 0, 12, "Flip / 4H bar",   kb)
     tc(dbg, 1, 12, str.tostring(nFlip) + " / " + str.tostring(nBar4), kb)
+    tc(dbg, 0, 13, "En güçlü oran",   kb)
+    tc(dbg, 1, 13, structDir == 0 ? "-" : str.tostring(bestR, "0.000"), color.new(color.purple, 40))
+    tc(dbg, 0, 14, "En güçlü fiyat",  kb)
+    tc(dbg, 1, 14, structDir == 0 ? "-" : f_p(bestP), color.new(color.purple, 40))
+    tc(dbg, 0, 15, "En güçlü Score",  kb)
+    tc(dbg, 1, 15, structDir == 0 ? "-" : str.tostring(bestS) + " / 100", color.new(bestS > 60 ? color.green : bestS > 25 ? color.orange : color.gray, 40))
