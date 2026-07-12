@@ -2,17 +2,21 @@
 // © berkayturhal38
 //@version=6
 // ============================================================================
-//  TURHAL AI PRO  —  MODÜLER PROTOTİP  v1.0
-//  12 bağımsız modül + şeffaf ağırlıklı confluence puanı + Türkçe panel.
-//  Her modül input ile AÇILIP KAPATILABİLİR; kapalı modül puanlamaya girmez
-//  (ablation testi için normalizasyon yalnızca AÇIK modül ağırlıklarıyla yapılır).
-//  MODÜLLER: Trend(MA/ADX/Ribbon) · Momentum(RSI/MACD/Divergence) · Structure
-//  (Swing/HH-HL-LH-LL/BOS-CHoCH) · S/R · Range · Fib/GoldenPocket · Liquidity
-//  (Sweep/SFP) · FVG · TrendLines/Kanal · Ichimoku · HTF · Risk(SL/TP/Trailing)
-//  NON-REPAINT: durum/olaylar yalnızca kapanmış barda (barstate.isconfirmed);
-//  pivotlar swingLen bar sağ-onay gecikmesiyle kesinleşir (gecikme bilinçli ve
-//  görünür); HTF verisi lookahead_off + [1] (kapanmış HTF barı). Panel canlı
-//  barda güncellenir ancak geçmiş etiket/olaylar sonradan DEĞİŞMEZ.
+//  TURHAL AI PRO  —  MODÜLER PROTOTİP  v2.0  (eXeTRADE mimarisi referanslı)
+//  Referans sistemin ÇALIŞMA MANTIĞI sıfırdan yeniden yazıldı (kod kopyalanmadı):
+//  ÇİFT SKOR: LONG 0-100 ve SHORT 0-100 ayrı hesaplanır; 4 bileşen grubu:
+//    A Trend (max30) · B Konum/S-R (max40) · C Momentum (max20) · D HTF (max20)
+//  ADX REJİM ÇARPANLARI: trend grubu xTrend (ADX>=30: 1.5), konum grubu xSR
+//    (ADX<20: 1.5) — trendde trend bileşenleri, rangede S/R bileşenleri ağır.
+//  SKOR KİLİDİ: skorlar bar KAPANIŞINDA kilitlenir (locked) -> sinyal repaint'siz.
+//  PROXIMITY GATE: girişe gateThr xATR'den yakın karşı S/R varsa skor -15.
+//  BOUNCE BONUSU: destek/direnç sıçraması +15, rejection/engulf mumu +5.
+//  KARAR: GÜÇLÜ LONG / LONG / BEKLE / SHORT / GÜÇLÜ SHORT (eşikler + skor farkı
+//    >= 10 + ADX filtreleri). Panel tüm grup katkılarını şeffaf gösterir.
+//  MODÜLLER (hepsi aç/kapa): Trend(MA/ADX/Ribbon) · Momentum(RSI/MACD/Div) ·
+//  Structure(HH-HL/BOS-CHoCH) · S/R · Range · Fib/GP · Liquidity(SFP) · FVG ·
+//  TrendLines/Kanal · Ichimoku · HTF · Risk(S/R tabanlı SL-TP + trailing)
+//  NON-REPAINT: olaylar isconfirmed; pivotlar swingLen sağ-onay; HTF lookahead_off+[1].
 //  License: MPL-2.0
 // ============================================================================
 indicator("Turhal AI PRO — Modüler", "Turhal AI PRO", overlay = true, max_lines_count = 80, max_labels_count = 80, max_boxes_count = 40)
@@ -79,6 +83,14 @@ tpRR     = input.float(2.0, "TP (R katı)", minval = 0.1, step = 0.1, group = gR
 useTrail = input.bool(false, "Trailing Stop (Chandelier) Göster", group = gRk)
 trailLen = input.int(10, "Trailing Periyodu", minval = 1, group = gRk)
 trailK   = input.float(2.0, "Trailing Mesafesi (xATR)", minval = 0.1, step = 0.1, group = gRk)
+
+gSig = "Sinyal & Skor"
+sigStrong     = input.int(90, "GÜÇLÜ Sinyal Eşiği", minval = 50, maxval = 100, group = gSig)
+sigNormal     = input.int(75, "Normal Sinyal Eşiği", minval = 30, maxval = 99, group = gSig)
+scoreClearMin = input.int(10, "Min Skor Farkı (L-S netliği)", minval = 0, maxval = 50, group = gSig)
+adxStrLimit   = input.int(15, "GÜÇLÜ için Min ADX (0=kapalı)", minval = 0, maxval = 50, group = gSig)
+gateMode      = input.string("Yumuşak (puan düş)", "Proximity Gate", options = ["Kapalı", "Yumuşak (puan düş)"], group = gSig)
+gateThr       = input.float(0.5, "Gate Yakınlık Eşiği (xATR)", minval = 0.1, step = 0.1, group = gSig)
 
 gV = "Görünüm"
 showPanel  = input.bool(true,  "Türkçe Panel", group = gV)
@@ -397,58 +409,181 @@ ichiTxt = na(cloudTop) ? "-" : close > cloudTop ? (tenkan > kijun ? "BULLISH" : 
 htfDir = not useHTF or na(htfF) or na(htfS) ? 0 : htfC > htfF and htfF > htfS ? 1 : htfC < htfF and htfF < htfS ? -1 : 0
 
 // ============================================================================
-//  MODÜL 12 — CONFLUENCE PUANLAMASI  (şeffaf; yalnızca AÇIK modüller normalize)
+//  MODÜL 12 — ÇİFT SKOR MOTORU  (eXeTRADE mimarisi; LONG ve SHORT 0-100 AYRI)
+//  Kapalı modülün bileşeni puan üretmez (ablation). Gruplar ADX rejimine göre
+//  çarpanlanır: trendde A grubu, rangede B grubu ağırlık kazanır.
 // ============================================================================
-W_TREND = 20
-W_MOM   = 15
-W_STR   = 15
-W_HTF   = 15
-W_ICHI  = 10
-W_LIQ   = 10
-W_FVG   = 5
-W_SR    = 5
-W_FIB   = 5
-W_TL    = 5
+multTrend  = na(adx) ? 1.0 : adx >= 30 ? 1.5 : adx >= 20 ? 1.0 : 0.5
+multSR     = na(adx) ? 1.0 : adx >= 30 ? 0.7 : adx >= 20 ? 1.0 : 1.5
+adxRanging = not na(adx) and adx < 20
 
-cTrend = trendDir * W_TREND
-cMom   = momDir   * W_MOM
-cStr   = structDir * W_STR
-cHtf   = htfDir   * W_HTF
-cIchi  = ichiDir  * W_ICHI
-cLiq   = liqDir   * W_LIQ
-cFvg   = fvgDirV  * W_FVG
-cSr    = srDir    * W_SR
-cFib   = fibDir   * W_FIB
-cTl    = tlDir    * W_TL
-// NOT: Range bilgi modülüdür (iskonto/prim gösterir); puan katkısını Fib/GP
-// taşır — aynı bilgiyi iki kez saymamak için Range'e ağırlık verilmedi.
+// ---- GRUP A: TREND (max 30) ----
+float lA = 0.0
+float sA = 0.0
+if useTrend and close > maF
+    lA += 8
+if useTrend and maF > maS
+    lA += 7
+if useTrend and maF > maF[1]
+    lA += 5
+if useMom and macdHist > 0
+    lA += 5
+if useIchi and not na(cloudTop) and close > cloudTop
+    lA += 5
+lA := math.min(30, lA)
+if useTrend and close < maF
+    sA += 8
+if useTrend and maF < maS
+    sA += 7
+if useTrend and maF < maF[1]
+    sA += 5
+if useMom and macdHist < 0
+    sA += 5
+if useIchi and not na(cloudBot) and close < cloudBot
+    sA += 5
+sA := math.min(30, sA)
 
-totW = (useTrend ? W_TREND : 0) + (useMom ? W_MOM : 0) + (useStruct ? W_STR : 0) + (useHTF ? W_HTF : 0) + (useIchi ? W_ICHI : 0) + (useLiq ? W_LIQ : 0) + (useFVG ? W_FVG : 0) + (useSR ? W_SR : 0) + (useFib ? W_FIB : 0) + (useTL ? W_TL : 0)
-rawScore = cTrend + cMom + cStr + cHtf + cIchi + cLiq + cFvg + cSr + cFib + cTl
-score = totW > 0 ? int(math.round(100.0 * rawScore / totW)) : 0
+// ---- GRUP B: KONUM / S-R (max 40) ----
+float lB = 0.0
+float sB = 0.0
+if useStruct and structDir == 1
+    lB += 8
+if useFib and inBullGP
+    lB += 8
+if useRange and not na(rngMid) and close < rngMid
+    lB += 5
+if useTL and tlDir == 1
+    lB += 8
+if useFVG and fvgDirV == 1
+    lB += 5
+if useLiq and bullSweepAct
+    lB += 8
+if useSR and not na(nearSup) and not na(atr) and (close - nearSup) <= 2 * atr
+    lB += 5
+lB := math.min(40, lB)
+if useStruct and structDir == -1
+    sB += 8
+if useFib and inBearGP
+    sB += 8
+if useRange and not na(rngMid) and close > rngMid
+    sB += 5
+if useTL and tlDir == -1
+    sB += 8
+if useFVG and fvgDirV == -1
+    sB += 5
+if useLiq and bearSweepAct
+    sB += 8
+if useSR and not na(nearRes) and not na(atr) and (nearRes - close) <= 2 * atr
+    sB += 5
+sB := math.min(40, sB)
 
-karar = score >= 60 ? "GÜÇLÜ LONG" : score >= 25 ? "LONG" : score <= -60 ? "GÜÇLÜ SHORT" : score <= -25 ? "SHORT" : "BEKLE"
-kararCol = score >= 60 ? color.new(color.green, 10) : score >= 25 ? color.new(color.green, 40) : score <= -60 ? color.new(color.red, 10) : score <= -25 ? color.new(color.red, 40) : color.new(color.gray, 30)
+// ---- GRUP C: MOMENTUM (max 20) ----
+float lC = 0.0
+float sC = 0.0
+if useMom and rsi < 70
+    lC += 7
+if useMom and bullDivAct
+    lC += 8
+if useMom and momDir == 1
+    lC += 5
+lC := math.min(20, lC)
+if useMom and rsi > 30
+    sC += 7
+if useMom and bearDivAct
+    sC += 8
+if useMom and momDir == -1
+    sC += 5
+sC := math.min(20, sC)
+
+// ---- GRUP D: HTF (max 20) ----
+float lD = 0.0
+float sD = 0.0
+if useHTF and htfDir == 1
+    lD += 10
+if useHTF and not na(htfF) and htfC > htfF
+    lD += 5
+if useHTF and not na(htfS) and htfC > htfS
+    lD += 5
+lD := math.min(20, lD)
+if useHTF and htfDir == -1
+    sD += 10
+if useHTF and not na(htfF) and htfC < htfF
+    sD += 5
+if useHTF and not na(htfS) and htfC < htfS
+    sD += 5
+sD := math.min(20, sD)
+
+// ---- Ham skorlar (ADX rejim çarpanlı) ----
+float longScoreRaw  = math.max(0, math.min(100, lA * multTrend + lB * multSR + lC + lD))
+float shortScoreRaw = math.max(0, math.min(100, sA * multTrend + sB * multSR + sC + sD))
+
+// ---- PROXIMITY GATE: girişe yakın KARŞI S/R varsa skor cezası ----
+gateOn = gateMode != "Kapalı"
+gateL  = gateOn and useSR and not na(nearRes) and not na(atr) and atr > 0 and (nearRes - close) <= gateThr * atr
+gateS  = gateOn and useSR and not na(nearSup) and not na(atr) and atr > 0 and (close - nearSup) <= gateThr * atr
+float longScore  = gateL ? math.max(0, longScoreRaw - 15) : longScoreRaw
+float shortScore = gateS ? math.max(0, shortScoreRaw - 15) : shortScoreRaw
+
+// ---- SKOR KİLİDİ: yalnızca bar kapanışında (sinyal repaint'siz) ----
+var float lockedL = 0.0
+var float lockedS = 0.0
+if barstate.isconfirmed
+    lockedL := longScore
+    lockedS := shortScore
+
+// ---- BOUNCE BONUSU: destek/direnç sıçraması + mum teyidi ----
+supBounce = useSR and not na(nearSup) and not na(atr) and low <= nearSup + 0.2 * atr and close > nearSup
+resBounce = useSR and not na(nearRes) and not na(atr) and high >= nearRes - 0.2 * atr and close < nearRes
+bodyS  = math.abs(close - open)
+lowerW = math.min(close, open) - low
+upperW = high - math.max(close, open)
+bullRej = lowerW > bodyS * 2 and close >= open and supBounce
+bearRej = upperW > bodyS * 2 and close <= open and resBounce
+bullEng = close > open and close[1] < open[1] and close > open[1] and open <= close[1] and supBounce
+bearEng = close < open and close[1] > open[1] and close < open[1] and open >= close[1] and resBounce
+float bounceL = (supBounce ? 15.0 : 0.0) + (bullRej or bullEng ? 5.0 : 0.0)
+float bounceS = (resBounce ? 15.0 : 0.0) + (bearRej or bearEng ? 5.0 : 0.0)
+
+// ---- KARAR ----
+float sigL = lockedL + bounceL
+float sigS = lockedS + bounceS
+float scoreDiff = lockedL - lockedS
+adxOKstr = adxStrLimit == 0 or (not na(adx) and adx >= adxStrLimit)
+
+strongL = sigL >= sigStrong and scoreDiff >= scoreClearMin and adxOKstr
+normalL = not strongL and sigL >= sigNormal and scoreDiff >= scoreClearMin and not adxRanging
+strongS = sigS >= sigStrong and -scoreDiff >= scoreClearMin and adxOKstr
+normalS = not strongS and sigS >= sigNormal and -scoreDiff >= scoreClearMin and not adxRanging
+
+karar = strongL ? "GÜÇLÜ LONG" : normalL ? "LONG" : strongS ? "GÜÇLÜ SHORT" : normalS ? "SHORT" : "BEKLE"
+kararCol = strongL ? color.new(color.green, 10) : normalL ? color.new(color.green, 40) : strongS ? color.new(color.red, 10) : normalS ? color.new(color.red, 40) : color.new(color.gray, 30)
 
 // ============================================================================
-//  MODÜL 13 — RİSK MOTORU  (ATR SL + RR TP + opsiyonel trailing; yalnızca bilgi)
+//  MODÜL 13 — RİSK MOTORU  (S/R tabanlı SL/TP, ATR fallback; yalnızca bilgi)
+//  SL: en yakın destek/direncin ötesi (S/R yoksa slATRk x ATR).
+//  TP: en yakın karşı S/R'nin berisi (0.2 ATR tampon; yoksa risk x RR).
 // ============================================================================
-setupLong  = useRisk and score >= 25
-setupShort = useRisk and score <= -25
+setupLong  = useRisk and (strongL or normalL)
+setupShort = useRisk and (strongS or normalS)
+trailHiV = ta.highest(high, trailLen)
+trailLoV = ta.lowest(low, trailLen)
 float rEntry = na
 float rSL = na
 float rTP = na
 float rTrail = na
 if setupLong and not na(atr)
     rEntry := close
-    rSL := close - slATRk * atr
-    rTP := close + slATRk * atr * tpRR
-    rTrail := useTrail ? ta.highest(high, trailLen) - trailK * atr : na
+    rSL := not na(nearSup) ? nearSup - slATRk * atr : close - slATRk * atr
+    riskL = rEntry - rSL
+    rTP := not na(nearRes) and nearRes - 0.2 * atr > close ? nearRes - 0.2 * atr : close + riskL * tpRR
+    rTrail := useTrail ? trailHiV - trailK * atr : na
 if setupShort and not na(atr)
     rEntry := close
-    rSL := close + slATRk * atr
-    rTP := close - slATRk * atr * tpRR
-    rTrail := useTrail ? ta.lowest(low, trailLen) + trailK * atr : na
+    rSL := not na(nearRes) ? nearRes + slATRk * atr : close + slATRk * atr
+    riskS = rSL - rEntry
+    rTP := not na(nearSup) and nearSup + 0.2 * atr < close ? nearSup + 0.2 * atr : close - riskS * tpRR
+    rTrail := useTrail ? trailLoV + trailK * atr : na
+float rRR = not na(rEntry) and not na(rSL) and not na(rTP) and math.abs(rEntry - rSL) > 0 ? math.abs(rTP - rEntry) / math.abs(rEntry - rSL) : na
 
 // ============================================================================
 //  GÖRSELLER  (her katman ayrı kapatılabilir; varsayılan sade)
@@ -521,51 +656,60 @@ if barstate.islast
                 tlChanLn := line.new(lastSLx, lastSL, bar_index, lastSL + slpS * (bar_index - lastSLx), extend = extend.right, color = color.new(color.red, 60), style = line.style_dashed, width = 1)
 
 // ============================================================================
-//  TÜRKÇE PANEL  (şeffaf puan dökümü: her modülün katkısı ayrı satırda)
+//  TÜRKÇE PANEL  (çift skor + grup dökümü + modül durumları + risk)
 // ============================================================================
 tc(table tb, int c, int r, string s, color bg) => table.cell(tb, c, r, s, text_color = color.white, bgcolor = bg, text_size = size.small)
-f_mrow(bool on, int d, int w) => on ? f_dirTxt(d) + "  (" + (d > 0 ? "+" : "") + str.tostring(d * w) + "p)" : "KAPALI"
+f_grp(float lv, float sv) => "L:" + str.tostring(lv, "0.#") + "  S:" + str.tostring(sv, "0.#")
+f_mtx(bool on, string s, int d) => on ? s : "KAPALI"
 f_mcol(bool on, int d) => on ? f_dirCol(d) : color.new(color.gray, 60)
 
 hd = color.new(color.black, 10)
 kb = color.new(color.black, 25)
-var table dash = table.new(position.top_right, 2, 19, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+scL = color.new(color.green, 55)
+scS = color.new(color.red, 55)
+var table dash = table.new(position.top_right, 2, 22, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
 if showPanel
     tc(dash, 0, 0,  "TURHAL AI PRO",  hd)
-    tc(dash, 1, 0,  "v1.0 Modüler",   hd)
+    tc(dash, 1, 0,  "v2.0 Çift Skor", hd)
     tc(dash, 0, 1,  "GENEL KARAR",    kb)
     tc(dash, 1, 1,  karar,            kararCol)
-    tc(dash, 0, 2,  "Toplam Puan",    kb)
-    tc(dash, 1, 2,  str.tostring(score) + " / ±100", color.new(color.blue, 40))
-    tc(dash, 0, 3,  "Trend [" + str.tostring(W_TREND) + "p]", kb)
-    tc(dash, 1, 3,  f_mrow(useTrend, trendDir, W_TREND), f_mcol(useTrend, trendDir))
-    tc(dash, 0, 4,  "Momentum [" + str.tostring(W_MOM) + "p]", kb)
-    tc(dash, 1, 4,  f_mrow(useMom, momDir, W_MOM) + (bullDivAct ? " DIV▲" : bearDivAct ? " DIV▼" : ""), f_mcol(useMom, momDir))
-    tc(dash, 0, 5,  "Yapı [" + str.tostring(W_STR) + "p]", kb)
-    tc(dash, 1, 5,  useStruct ? (structDir == 1 ? "BULLISH" : structDir == -1 ? "BEARISH" : "RANGE") + "  (" + (structDir > 0 ? "+" : "") + str.tostring(cStr) + "p) " + lastEvent : "KAPALI", f_mcol(useStruct, structDir))
-    tc(dash, 0, 6,  "ADX / Güç",      kb)
-    tc(dash, 1, 6,  (na(adx) ? "-" : str.tostring(adx, "0.0")) + "  " + trendStrongTxt, kb)
-    tc(dash, 0, 7,  "Destek/Direnç [" + str.tostring(W_SR) + "p]", kb)
-    tc(dash, 1, 7,  useSR ? srTxt + "  (" + (srDir > 0 ? "+" : "") + str.tostring(cSr) + "p)" : "KAPALI", f_mcol(useSR, srDir))
-    tc(dash, 0, 8,  "Range",          kb)
-    tc(dash, 1, 8,  useRange ? rangeTxt + "  M:" + f_px(rngMid) : "KAPALI", f_mcol(useRange, rangeDir))
-    tc(dash, 0, 9,  "Fib/GP [" + str.tostring(W_FIB) + "p]", kb)
-    tc(dash, 1, 9,  useFib ? fibTxt + "  (" + (fibDir > 0 ? "+" : "") + str.tostring(cFib) + "p)" : "KAPALI", f_mcol(useFib, fibDir))
-    tc(dash, 0, 10, "Liquidity [" + str.tostring(W_LIQ) + "p]", kb)
-    tc(dash, 1, 10, useLiq ? liqTxt + "  (" + (liqDir > 0 ? "+" : "") + str.tostring(cLiq) + "p)" : "KAPALI", f_mcol(useLiq, liqDir))
-    tc(dash, 0, 11, "FVG [" + str.tostring(W_FVG) + "p]", kb)
-    tc(dash, 1, 11, useFVG ? fvgTxt + "  (" + (fvgDirV > 0 ? "+" : "") + str.tostring(cFvg) + "p)" : "KAPALI", f_mcol(useFVG, fvgDirV))
-    tc(dash, 0, 12, "Trend Çizgisi [" + str.tostring(W_TL) + "p]", kb)
-    tc(dash, 1, 12, useTL ? tlTxt + "  (" + (tlDir > 0 ? "+" : "") + str.tostring(cTl) + "p)" : "KAPALI", f_mcol(useTL, tlDir))
-    tc(dash, 0, 13, "Ichimoku [" + str.tostring(W_ICHI) + "p]", kb)
-    tc(dash, 1, 13, useIchi ? ichiTxt + "  (" + (ichiDir > 0 ? "+" : "") + str.tostring(cIchi) + "p)" : "KAPALI", f_mcol(useIchi, ichiDir))
-    tc(dash, 0, 14, "HTF " + htfTF + " [" + str.tostring(W_HTF) + "p]", kb)
-    tc(dash, 1, 14, useHTF ? f_dirTxt(htfDir) + "  (" + (htfDir > 0 ? "+" : "") + str.tostring(cHtf) + "p)" : "KAPALI", f_mcol(useHTF, htfDir))
-    tc(dash, 0, 15, "Önerilen Giriş", kb)
-    tc(dash, 1, 15, f_px(rEntry),     kb)
-    tc(dash, 0, 16, "Önerilen SL",    kb)
-    tc(dash, 1, 16, f_px(rSL),        color.new(color.red, 50))
-    tc(dash, 0, 17, "Önerilen TP",    kb)
-    tc(dash, 1, 17, f_px(rTP),        color.new(color.green, 50))
-    tc(dash, 0, 18, "Trailing Stop",  kb)
-    tc(dash, 1, 18, useTrail ? f_px(rTrail) : "KAPALI", kb)
+    tc(dash, 0, 2,  "LONG Skor",      kb)
+    tc(dash, 1, 2,  str.tostring(math.round(sigL)) + " / 100" + (bounceL > 0 ? "  (+" + str.tostring(math.round(bounceL)) + " bounce)" : "") + (gateL ? "  GATE-15" : ""), sigL >= sigNormal ? color.new(color.green, 25) : scL)
+    tc(dash, 0, 3,  "SHORT Skor",     kb)
+    tc(dash, 1, 3,  str.tostring(math.round(sigS)) + " / 100" + (bounceS > 0 ? "  (+" + str.tostring(math.round(bounceS)) + " bounce)" : "") + (gateS ? "  GATE-15" : ""), sigS >= sigNormal ? color.new(color.red, 25) : scS)
+    tc(dash, 0, 4,  "Skor Farkı (L-S)", kb)
+    tc(dash, 1, 4,  str.tostring(math.round(scoreDiff)) + "  (min " + str.tostring(scoreClearMin) + ")", math.abs(scoreDiff) >= scoreClearMin ? color.new(color.blue, 40) : color.new(color.gray, 40))
+    tc(dash, 0, 5,  "ADX / Rejim",    kb)
+    tc(dash, 1, 5,  (na(adx) ? "-" : str.tostring(adx, "0.0")) + "  " + trendStrongTxt + "  (A x" + str.tostring(multTrend, "0.0") + " / B x" + str.tostring(multSR, "0.0") + ")", kb)
+    tc(dash, 0, 6,  "A Trend (max30)", kb)
+    tc(dash, 1, 6,  f_grp(lA, sA),    kb)
+    tc(dash, 0, 7,  "B Konum/S-R (max40)", kb)
+    tc(dash, 1, 7,  f_grp(lB, sB),    kb)
+    tc(dash, 0, 8,  "C Momentum (max20)", kb)
+    tc(dash, 1, 8,  f_grp(lC, sC) + (bullDivAct ? " DIV▲" : bearDivAct ? " DIV▼" : ""), kb)
+    tc(dash, 0, 9,  "D HTF " + htfTF + " (max20)", kb)
+    tc(dash, 1, 9,  f_grp(lD, sD),    kb)
+    tc(dash, 0, 10, "Yapı",           kb)
+    tc(dash, 1, 10, f_mtx(useStruct, (structDir == 1 ? "BULLISH" : structDir == -1 ? "BEARISH" : "RANGE") + "  " + lastEvent, structDir), f_mcol(useStruct, structDir))
+    tc(dash, 0, 11, "Destek/Direnç",  kb)
+    tc(dash, 1, 11, f_mtx(useSR, srTxt + "  S:" + f_px(nearSup) + " R:" + f_px(nearRes), srDir), f_mcol(useSR, srDir))
+    tc(dash, 0, 12, "Range",          kb)
+    tc(dash, 1, 12, f_mtx(useRange, rangeTxt + "  M:" + f_px(rngMid), rangeDir), f_mcol(useRange, rangeDir))
+    tc(dash, 0, 13, "Fib/GP",         kb)
+    tc(dash, 1, 13, f_mtx(useFib, fibTxt, fibDir), f_mcol(useFib, fibDir))
+    tc(dash, 0, 14, "Liquidity",      kb)
+    tc(dash, 1, 14, f_mtx(useLiq, liqTxt, liqDir), f_mcol(useLiq, liqDir))
+    tc(dash, 0, 15, "FVG",            kb)
+    tc(dash, 1, 15, f_mtx(useFVG, fvgTxt, fvgDirV), f_mcol(useFVG, fvgDirV))
+    tc(dash, 0, 16, "Trend Çizgisi",  kb)
+    tc(dash, 1, 16, f_mtx(useTL, tlTxt, tlDir), f_mcol(useTL, tlDir))
+    tc(dash, 0, 17, "Ichimoku",       kb)
+    tc(dash, 1, 17, f_mtx(useIchi, ichiTxt, ichiDir), f_mcol(useIchi, ichiDir))
+    tc(dash, 0, 18, "Önerilen Giriş", kb)
+    tc(dash, 1, 18, f_px(rEntry) + (na(rRR) ? "" : "  (R:R " + str.tostring(rRR, "0.0") + ")"), kb)
+    tc(dash, 0, 19, "Önerilen SL",    kb)
+    tc(dash, 1, 19, f_px(rSL),        color.new(color.red, 50))
+    tc(dash, 0, 20, "Önerilen TP",    kb)
+    tc(dash, 1, 20, f_px(rTP),        color.new(color.green, 50))
+    tc(dash, 0, 21, "Trailing Stop",  kb)
+    tc(dash, 1, 21, useTrail ? f_px(rTrail) : "KAPALI", kb)
