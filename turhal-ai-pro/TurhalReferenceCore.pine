@@ -313,3 +313,153 @@ if barstate.islast
                 off = array.get(chOff, s)
                 array.push(dLn, line.new(x1d, y1 + off, xR, y2 + off, color = color.new(col, s >= 2 ? 55 : 25), style = line.style_solid, width = 1))
                 array.push(dLn, line.new(x1d, y1 + off / 2, xR, y2 + off / 2, color = color.new(col, 65), style = line.style_dashed, width = 1))
+
+// ############################################################################
+//  M2 — SKORLU S/R HAVUZU  →  MERGE  →  TOP-3 DESTEK + TOP-3 DİRENÇ BÖLGESİ
+//  M1'den TAMAMEN BAĞIMSIZ modül; M1 state'ine okuma/yazma YAPMAZ.
+//  Kaynak: yalnızca onaylı pivot high/low. Havuza girişte 0.3xATR merge.
+//  Her seviyede temas (0.5xATR bölge, >= 3 bar gap) ve ihlal (close seviyeyi
+//  0.5xATR marjla KESEREK geçerse) sayılır. Skor = temas - ihlal.
+//  Geçerlilik: temas >= 2 ve skor > 0. Çizimde 0.5xATR final merge + fiyata
+//  göre destek/direnç sınıflaması + yalnızca Top-3 + Top-3 dar bölge kutusu.
+//  Non-repaint: havuz/sayaçlar yalnızca isconfirmed'de; çizim islast'ta.
+// ############################################################################
+gS2 = "M2 — S/R Havuzu"
+srLen     = input.int(10, "S/R Pivot Uzunluğu", minval = 3, maxval = 30, group = gS2)
+srMergeK  = input.float(0.3, "Havuza Giriş Merge (xATR)", minval = 0.05, step = 0.05, group = gS2)
+srTzK     = input.float(0.5, "Temas Bölgesi (xATR)", minval = 0.1, step = 0.1, group = gS2)
+srGap     = input.int(3, "Temaslar Arası Min Bar", minval = 1, maxval = 20, group = gS2)
+srViolK   = input.float(0.5, "İhlal Marjı (xATR)", minval = 0.1, step = 0.1, group = gS2)
+srPoolMax = input.int(20, "Havuz Kapasitesi", minval = 5, maxval = 40, group = gS2)
+srFinalK  = input.float(0.5, "Final Merge (xATR)", minval = 0.1, step = 0.1, group = gS2)
+showSR    = input.bool(true, "S/R Bölgelerini Göster", group = gS2)
+
+srPh = ta.pivothigh(srLen, srLen)
+srPl = ta.pivotlow(srLen, srLen)
+
+// Havuz state: seviye fiyatı + temas + ihlal + son temas barı
+var float[] srLv  = array.new_float()
+var int[]   srTch = array.new_int()
+var int[]   srVio = array.new_int()
+var int[]   srLtb = array.new_int()
+
+f_srAdd(float lv) =>
+    if not na(atr) and atr > 0
+        bool exists = false
+        if array.size(srLv) > 0
+            for i = 0 to array.size(srLv) - 1
+                if math.abs(array.get(srLv, i) - lv) < srMergeK * atr
+                    exists := true
+                    break
+        if not exists
+            array.push(srLv, lv)
+            array.push(srTch, 1)
+            array.push(srVio, 0)
+            array.push(srLtb, bar_index)
+            if array.size(srLv) > srPoolMax
+                array.shift(srLv)
+                array.shift(srTch)
+                array.shift(srVio)
+                array.shift(srLtb)
+
+if barstate.isconfirmed
+    if not na(srPl)
+        f_srAdd(srPl)
+    if not na(srPh)
+        f_srAdd(srPh)
+    if not na(atr) and atr > 0 and array.size(srLv) > 0
+        tzS = srTzK * atr
+        vzS = srViolK * atr
+        for i = 0 to array.size(srLv) - 1
+            lv = array.get(srLv, i)
+            // Temas: bar aralığı 0.5xATR bölgeyle kesişiyor (gap korumalı)
+            if low <= lv + tzS and high >= lv - tzS
+                if bar_index - array.get(srLtb, i) >= srGap
+                    array.set(srTch, i, array.get(srTch, i) + 1)
+                    array.set(srLtb, i, bar_index)
+            // İhlal: close seviyeyi 0.5xATR marjla KESEREK geçti (crossing, süreklilik değil)
+            if (close > lv + vzS and close[1] <= lv + vzS) or (close < lv - vzS and close[1] >= lv - vzS)
+                array.set(srVio, i, array.get(srVio, i) + 1)
+
+// ---- M2 ÇİZİM: geçerli seviyeler -> final merge -> Top-3 x 2 bölge kutusu ----
+var box[]   m2Bx = array.new_box()
+var label[] m2Lb = array.new_label()
+if barstate.islast
+    for bx in m2Bx
+        box.delete(bx)
+    for lb in m2Lb
+        label.delete(lb)
+    array.clear(m2Bx)
+    array.clear(m2Lb)
+    if showSR and not na(atr) and atr > 0 and array.size(srLv) > 0
+        // 1) Geçerlilik filtresi: temas >= 2 ve skor > 0
+        tP = array.new_float()
+        tS = array.new_float()
+        tT = array.new_int()
+        for i = 0 to array.size(srLv) - 1
+            scI = array.get(srTch, i) - array.get(srVio, i)
+            if array.get(srTch, i) >= 2 and scI > 0
+                array.push(tP, array.get(srLv, i))
+                array.push(tS, float(scI))
+                array.push(tT, array.get(srTch, i))
+        // 2) Final merge (0.5xATR): grup ana fiyatı = en yüksek skorlu üye;
+        //    bölge sınırları = grup min/max; skor ve temas TOPLANIR
+        gP  = array.new_float()
+        gSc = array.new_float()
+        gT  = array.new_int()
+        gHi = array.new_float()
+        gLo = array.new_float()
+        nT = array.size(tP)
+        if nT > 0
+            used = array.new_bool(nT, false)
+            for i = 0 to nT - 1
+                if not array.get(used, i)
+                    mainP = array.get(tP, i)
+                    bestS = array.get(tS, i)
+                    hiV = mainP
+                    loV = mainP
+                    sSum = array.get(tS, i)
+                    tSum = array.get(tT, i)
+                    if i < nT - 1
+                        for j = i + 1 to nT - 1
+                            if not array.get(used, j) and math.abs(array.get(tP, j) - mainP) < srFinalK * atr
+                                array.set(used, j, true)
+                                hiV := math.max(hiV, array.get(tP, j))
+                                loV := math.min(loV, array.get(tP, j))
+                                sSum += array.get(tS, j)
+                                tSum += array.get(tT, j)
+                                if array.get(tS, j) > bestS
+                                    bestS := array.get(tS, j)
+                                    mainP := array.get(tP, j)
+                    array.push(gP, mainP)
+                    array.push(gSc, sSum)
+                    array.push(gT, tSum)
+                    array.push(gHi, hiV)
+                    array.push(gLo, loV)
+        // 3) Sınıflandır (güncel fiyata göre) + Top-3 seçim + dar bölge kutusu
+        nG = array.size(gP)
+        if nG > 0
+            gUsed = array.new_bool(nG, false)
+            xL = bar_index - 80
+            xRr = bar_index + 15
+            for side = 0 to 1                      // 0 = destek (lv < close), 1 = direnç (lv > close)
+                for rank = 1 to 3
+                    int bi = -1
+                    float bs = 0.0
+                    for k = 0 to nG - 1
+                        okSide = side == 0 ? array.get(gP, k) < close : array.get(gP, k) > close
+                        if not array.get(gUsed, k) and okSide and array.get(gSc, k) > bs
+                            bs := array.get(gSc, k)
+                            bi := k
+                    if bi >= 0
+                        array.set(gUsed, bi, true)
+                        mP = array.get(gP, bi)
+                        zT = array.get(gHi, bi)
+                        zB = array.get(gLo, bi)
+                        if zT - zB < 0.3 * atr      // dar ATR bölgesi: minimum kalınlık
+                            zT := mP + 0.15 * atr
+                            zB := mP - 0.15 * atr
+                        cS = side == 0 ? color.green : color.red
+                        array.push(m2Bx, box.new(xL, zT, xRr, zB, bgcolor = color.new(cS, 85), border_color = color.new(cS, 55), border_width = array.get(gSc, bi) >= 5 ? 2 : 1))
+                        txt = (side == 0 ? "S" : "R") + str.tostring(rank) + ": " + str.tostring(mP, format.mintick) + "  " + str.tostring(array.get(gT, bi)) + "t  s:" + str.tostring(array.get(gSc, bi), "0.#")
+                        array.push(m2Lb, label.new(xRr, mP, txt, color = color.new(cS, 80), textcolor = color.white, size = size.tiny, style = label.style_label_left))
