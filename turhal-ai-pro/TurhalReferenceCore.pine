@@ -463,3 +463,39 @@ if barstate.islast
                         array.push(m2Bx, box.new(xL, zT, xRr, zB, bgcolor = color.new(cS, 85), border_color = color.new(cS, 55), border_width = array.get(gSc, bi) >= 5 ? 2 : 1))
                         txt = (side == 0 ? "S" : "R") + str.tostring(rank) + ": " + str.tostring(mP, format.mintick) + "  " + str.tostring(array.get(gT, bi)) + "t  s:" + str.tostring(array.get(gSc, bi), "0.#")
                         array.push(m2Lb, label.new(xRr, mP, txt, color = color.new(cS, 80), textcolor = color.white, size = size.tiny, style = label.style_label_left))
+
+// ############################################################################
+//  M3 — DİNAMİK TREND OMURGASI  (EMA50 + EMA200 + KAMA(10) + opsiyonel ribbon)
+//  M1 ve M2'den TAMAMEN BAĞIMSIZ: onların state'ine, fonksiyonlarına ve
+//  inputlarına dokunmaz; TL seçimlerini ve S/R bölgelerini FİLTRELEMEZ.
+//  Yön (EMA50 vs EMA200) yalnızca ribbon rengini besler; başka hiçbir şeyi.
+//  YOK: skor, sinyal, panel, strateji, Best-MA, Fib/FVG/RSI/MACD/Ichimoku/HTF.
+// ############################################################################
+gM3 = "M3 — Trend Omurgası"
+emaFastLen = input.int(50,  "EMA Hızlı Periyot", minval = 1, group = gM3)
+emaSlowLen = input.int(200, "EMA Yavaş Periyot", minval = 1, group = gM3)
+kamaLen    = input.int(10,  "KAMA Periyodu", minval = 2, group = gM3)
+showEmaLn  = input.bool(true, "EMA Çizgileri", group = gM3)
+showKama   = input.bool(true, "KAMA Çizgisi", group = gM3)
+showRibbon = input.bool(true, "Ribbon (çok soluk fill)", group = gM3)
+
+emaF = ta.ema(close, emaFastLen)
+emaS = ta.ema(close, emaSlowLen)
+
+// KAMA (Kaufman): ER = |close - close[n]| / Σ|Δclose|  (payda 0 -> ER 0)
+//                 SC = (ER * (fast - slow) + slow)^2 ; fast = 2/3, slow = 2/31
+kamaSeed  = ta.sma(close, kamaLen)                                 // tohum (koşulsuz hesap)
+kamaNoise = math.sum(math.abs(ta.change(close)), kamaLen)
+kamaER    = na(kamaNoise) or kamaNoise == 0 ? 0.0 : math.abs(close - close[kamaLen]) / kamaNoise
+kamaSC    = math.pow(kamaER * (2.0 / 3.0 - 2.0 / 31.0) + 2.0 / 31.0, 2)
+var float kamaV = na
+kamaV := na(kamaV[1]) ? kamaSeed : kamaV[1] + kamaSC * (close - kamaV[1])
+
+m3Up = emaF > emaS   // ana trend YUKARI; yalnızca ribbon rengi için kullanılır
+
+plot(showEmaLn ? emaF : na, "M3 EMA50",  color = color.new(color.orange, 0), linewidth = 1)
+plot(showEmaLn ? emaS : na, "M3 EMA200", color = color.new(color.purple, 0), linewidth = 2)
+plot(showKama ? kamaV : na, "M3 KAMA",   color = color.new(color.yellow, 0), linewidth = 2)
+m3p1 = plot(emaF, "M3 RibbonA", color = na, display = display.none)
+m3p2 = plot(emaS, "M3 RibbonB", color = na, display = display.none)
+fill(m3p1, m3p2, color = showRibbon ? (m3Up ? color.new(color.green, 92) : color.new(color.red, 92)) : na)
