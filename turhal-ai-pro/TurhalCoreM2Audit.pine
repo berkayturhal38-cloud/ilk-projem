@@ -45,6 +45,10 @@ depBars  = input.int(5, "Bağımlı Temas Penceresi (bar)", minval = 1, maxval =
 showPanel = input.bool(true, "İstatistik Paneli", group = gA)
 showMarks = input.bool(true, "Sonuç İşaretleri (✓/✗/·)", group = gA)
 
+gT = "Trader Özeti"
+advMode    = input.bool(false, "Gelişmiş Mod (ham istatistikler)", group = gT)
+showBadges = input.bool(true,  "Bölge Rozetleri (yıldız)", group = gT)
+
 // ============================================================================
 //  M2 HAVUZ  —  RefCore M2 kopyası (matematik birebir; yalnızca FSM defterleri
 //  paralel dizi olarak eklendi — havuz davranışına etkisi SIFIR)
@@ -243,49 +247,126 @@ if barstate.isconfirmed
                     array.set(epTrkN, i, array.get(epTrkN, i) + 1)
 
 // ============================================================================
-//  İSTATİSTİK PANELİ
+//  TRADER ÖZET KATMANI  (audit hesaplarına DOKUNMAZ; yalnızca sayaçları okur)
+//  Güven Puanı (0-100) = %40 K1 (ilk temas tepki) + %30 çalışma oranı
+//                      + %20 K3 sağlamlık (yaşam/30 ve test/2 normalize)
+//                      + %10 K2 rank monotonluğu (100/60/20)
+//  Yıldız: >=80 ★★★★★, >=65 ★★★★, >=50 ★★★, >=35 ★★, altı ★
+//  Sınıf : >=65 GÜÇLÜ, >=45 ORTA, altı ZAYIF
 // ============================================================================
 f_pct(int a, int b) => b > 0 ? "%" + str.tostring(math.round(a * 100.0 / b)) + " (" + str.tostring(a) + "/" + str.tostring(b) + ")" : "-"
 f_rankRow(int idx) =>
     t = array.get(rnkT, idx)
     w = array.get(rnkW, idx)
     t > 0 ? "%" + str.tostring(math.round(w * 100.0 / t)) + " (" + str.tostring(w) + "/" + str.tostring(t) + ")" : "-"
+f_rankPct(int idx) =>
+    t = array.get(rnkT, idx)
+    t > 0 ? array.get(rnkW, idx) * 100.0 / t : na
+f_stars(int n) => n >= 5 ? "★★★★★" : n == 4 ? "★★★★" : n == 3 ? "★★★" : n == 2 ? "★★" : "★"
 tc(table tb, int c, int r, string s, color bg) => table.cell(tb, c, r, s, text_color = color.white, bgcolor = bg, text_size = size.small)
 
+// ---- Güven Puanı bileşenleri ----
+calisma = tepkiN + kirN
+float k1Pct  = firstN > 0 ? firstWin * 100.0 / firstN : na
+float calPct = calisma > 0 ? tepkiN * 100.0 / calisma : na
+float yasam  = cntDead > 0 ? lifeSum * 1.0 / cntDead : na
+float testO  = cntDead > 0 ? testsSum * 1.0 / cntDead : na
+float sagPct = (na(yasam) ? 50.0 : math.min(yasam / 30.0, 1.0) * 50.0) + (na(testO) ? 25.0 : math.min(testO / 2.0, 1.0) * 50.0)
+float rk1 = f_rankPct(0)
+float rk2 = f_rankPct(1)
+float rk3 = f_rankPct(2)
+float monoPct = na(rk1) or na(rk2) or na(rk3) ? 60.0 : rk1 >= rk2 and rk2 >= rk3 ? 100.0 : rk1 >= rk3 ? 60.0 : 20.0
+bool  hazir = not na(k1Pct) and not na(calPct)
+int   guven = hazir ? int(math.round(0.4 * k1Pct + 0.3 * calPct + 0.2 * sagPct + 0.1 * monoPct)) : 0
+int   yildizN = guven >= 80 ? 5 : guven >= 65 ? 4 : guven >= 50 ? 3 : guven >= 35 ? 2 : 1
+string sinif  = guven >= 65 ? "GÜÇLÜ" : guven >= 45 ? "ORTA" : "ZAYIF"
+color  sinifC = guven >= 65 ? color.new(color.green, 25) : guven >= 45 ? color.new(color.orange, 30) : color.new(color.red, 35)
+string yorum  = not hazir ? "Veri toplanıyor — puana henüz güvenme" : guven >= 65 ? "Bölgeler güvenilir; S1/R1 öncelikli izlenebilir" : guven >= 45 ? "Bölgeler kısmen çalışıyor; tek başına karar verme" : "Bölgelere güvenme; sembol/TF veya parametre gözden geçir"
+okSample = cntValid >= 30
+okBars   = bar_index >= 600
+
+// ---- Bölge rozetleri: aktif geçerli seviyelere yıldız (seviye kendi geçmişi) ----
+var label[] bdgPool = array.new_label()
+if barstate.islast
+    for lb in bdgPool
+        label.delete(lb)
+    array.clear(bdgPool)
+    if showBadges and array.size(srLv) > 0
+        for i = 0 to array.size(srLv) - 1
+            stI = array.get(epSt, i)
+            scI = array.get(srTch, i) - array.get(srVio, i)
+            if stI >= 1 and stI <= 3 and array.get(srTch, i) >= 2 and scI > 0
+                lvStars = math.min(5, 1 + array.get(epTepkiCnt, i) + (scI >= 3 ? 1 : 0))
+                bc = lvStars >= 4 ? color.green : lvStars == 3 ? color.orange : color.gray
+                array.push(bdgPool, label.new(bar_index + 3, array.get(srLv, i), f_stars(lvStars), color = color.new(bc, 55), textcolor = color.white, size = size.tiny, style = label.style_label_left))
+
+// Aktif bölge sınıf sayımı (özet paneli için)
+int nStrong = 0
+int nMid = 0
+int nWeak = 0
+if array.size(srLv) > 0
+    for i = 0 to array.size(srLv) - 1
+        stI = array.get(epSt, i)
+        scI = array.get(srTch, i) - array.get(srVio, i)
+        if stI >= 1 and stI <= 3 and array.get(srTch, i) >= 2 and scI > 0
+            lvStars = math.min(5, 1 + array.get(epTepkiCnt, i) + (scI >= 3 ? 1 : 0))
+            if lvStars >= 4
+                nStrong += 1
+            else if lvStars == 3
+                nMid += 1
+            else
+                nWeak += 1
+
+// ============================================================================
+//  PANEL  (varsayılan: sade trader özeti; Gelişmiş Mod: ham istatistikler)
+// ============================================================================
 hd = color.new(color.black, 10)
 kb = color.new(color.black, 25)
 var table dbg = table.new(position.top_right, 2, 15, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
 if showPanel and barstate.islast
-    okSample = cntValid >= 30
-    okBars   = bar_index >= 600
-    calisma  = tepkiN + kirN
-    tc(dbg, 0, 0,  "M2 AUDIT",            hd)
-    tc(dbg, 1, 0,  "v1",                  hd)
-    tc(dbg, 0, 1,  "Örneklem (episode)",  kb)
-    tc(dbg, 1, 1,  str.tostring(cntValid) + (okSample ? "  YETERLİ" : "  YETERSİZ (min 30)"), color.new(okSample ? color.green : color.red, 40))
-    tc(dbg, 0, 2,  "Geçmiş bar",          kb)
-    tc(dbg, 1, 2,  str.tostring(bar_index) + (okBars ? "" : "  AZ (min 600)"), color.new(okBars ? color.gray : color.orange, 40))
-    tc(dbg, 0, 3,  "K1: İlk temas TEPKİ", kb)
-    tc(dbg, 1, 3,  f_pct(firstWin, firstN), color.new(firstN > 0 and firstWin * 100 >= firstN * 55 ? color.green : color.orange, 40))
-    tc(dbg, 0, 4,  "TEPKİ / ZAYIF / KIRILDI", kb)
-    tc(dbg, 1, 4,  str.tostring(tepkiN) + " / " + str.tostring(zayifN) + " / " + str.tostring(kirN), kb)
-    tc(dbg, 0, 5,  "Çalışma oranı",       kb)
-    tc(dbg, 1, 5,  f_pct(tepkiN, calisma), kb)
-    tc(dbg, 0, 6,  "Ort. tepki (xATR)",   kb)
-    tc(dbg, 1, 6,  tepkiN > 0 ? str.tostring(reactSum / tepkiN, "0.00") : "-", kb)
-    tc(dbg, 0, 7,  "K3: Ort. yaşam (bar)", kb)
-    tc(dbg, 1, 7,  cntDead > 0 ? str.tostring(lifeSum / cntDead) : "-", kb)
-    tc(dbg, 0, 8,  "K3: Kırılım öncesi test", kb)
-    tc(dbg, 1, 8,  cntDead > 0 ? str.tostring(testsSum * 1.0 / cntDead, "0.0") : "-", kb)
-    tc(dbg, 0, 9,  "K2: Rank1 tepki",     kb)
-    tc(dbg, 1, 9,  f_rankRow(0),          kb)
-    tc(dbg, 0, 10, "K2: Rank2 tepki",     kb)
-    tc(dbg, 1, 10, f_rankRow(1),          kb)
-    tc(dbg, 0, 11, "K2: Rank3 tepki",     kb)
-    tc(dbg, 1, 11, f_rankRow(2),          kb)
-    tc(dbg, 0, 12, "Rank4+ tepki",        kb)
-    tc(dbg, 1, 12, f_rankRow(3),          kb)
-    tc(dbg, 0, 13, "K4: Bağımlı temas",   kb)
-    tc(dbg, 1, 13, f_pct(depN, nearN),    color.new(nearN > 0 and depN * 100 >= nearN * 60 ? color.orange : color.gray, 40))
-    tc(dbg, 0, 14, "Ölen / Aktif seviye", kb)
-    tc(dbg, 1, 14, str.tostring(cntDead) + " / " + str.tostring(cntValid - cntDead), kb)
+    if not advMode
+        // ---- SADE GÖRÜNÜM ----
+        tc(dbg, 0, 0, "M2 BÖLGE KALİTESİ", hd)
+        tc(dbg, 1, 0, "Audit v1",          hd)
+        tc(dbg, 0, 1, "Durum",             kb)
+        tc(dbg, 1, 1, hazir and okSample ? "HAZIR" : "VERİ TOPLANIYOR", color.new(hazir and okSample ? color.green : color.orange, 40))
+        tc(dbg, 0, 2, "Güven Puanı",       kb)
+        tc(dbg, 1, 2, hazir ? str.tostring(guven) + " / 100" + (okSample ? "" : "  (ön izleme)") : "-", sinifC)
+        tc(dbg, 0, 3, "Değerlendirme",     kb)
+        tc(dbg, 1, 3, hazir ? f_stars(yildizN) + "  " + sinif : "-", sinifC)
+        tc(dbg, 0, 4, "Aktif bölgeler",    kb)
+        tc(dbg, 1, 4, str.tostring(nStrong) + " güçlü / " + str.tostring(nMid) + " orta / " + str.tostring(nWeak) + " zayıf", kb)
+        tc(dbg, 0, 5, "Yorum",             kb)
+        tc(dbg, 1, 5, yorum,               kb)
+    else
+        // ---- GELİŞMİŞ MOD: ham istatistikler (audit hesapları birebir) ----
+        tc(dbg, 0, 0,  "M2 AUDIT",            hd)
+        tc(dbg, 1, 0,  "Gelişmiş  ·  Güven " + (hazir ? str.tostring(guven) : "-"), hd)
+        tc(dbg, 0, 1,  "Örneklem (episode)",  kb)
+        tc(dbg, 1, 1,  str.tostring(cntValid) + (okSample ? "  YETERLİ" : "  YETERSİZ (min 30)"), color.new(okSample ? color.green : color.red, 40))
+        tc(dbg, 0, 2,  "Geçmiş bar",          kb)
+        tc(dbg, 1, 2,  str.tostring(bar_index) + (okBars ? "" : "  AZ (min 600)"), color.new(okBars ? color.gray : color.orange, 40))
+        tc(dbg, 0, 3,  "K1: İlk temas TEPKİ", kb)
+        tc(dbg, 1, 3,  f_pct(firstWin, firstN), color.new(firstN > 0 and firstWin * 100 >= firstN * 55 ? color.green : color.orange, 40))
+        tc(dbg, 0, 4,  "TEPKİ / ZAYIF / KIRILDI", kb)
+        tc(dbg, 1, 4,  str.tostring(tepkiN) + " / " + str.tostring(zayifN) + " / " + str.tostring(kirN), kb)
+        tc(dbg, 0, 5,  "Çalışma oranı",       kb)
+        tc(dbg, 1, 5,  f_pct(tepkiN, calisma), kb)
+        tc(dbg, 0, 6,  "Ort. tepki (xATR)",   kb)
+        tc(dbg, 1, 6,  tepkiN > 0 ? str.tostring(reactSum / tepkiN, "0.00") : "-", kb)
+        tc(dbg, 0, 7,  "K3: Ort. yaşam (bar)", kb)
+        tc(dbg, 1, 7,  cntDead > 0 ? str.tostring(lifeSum / cntDead) : "-", kb)
+        tc(dbg, 0, 8,  "K3: Kırılım öncesi test", kb)
+        tc(dbg, 1, 8,  cntDead > 0 ? str.tostring(testsSum * 1.0 / cntDead, "0.0") : "-", kb)
+        tc(dbg, 0, 9,  "K2: Rank1 tepki",     kb)
+        tc(dbg, 1, 9,  f_rankRow(0),          kb)
+        tc(dbg, 0, 10, "K2: Rank2 tepki",     kb)
+        tc(dbg, 1, 10, f_rankRow(1),          kb)
+        tc(dbg, 0, 11, "K2: Rank3 tepki",     kb)
+        tc(dbg, 1, 11, f_rankRow(2),          kb)
+        tc(dbg, 0, 12, "Rank4+ tepki",        kb)
+        tc(dbg, 1, 12, f_rankRow(3),          kb)
+        tc(dbg, 0, 13, "K4: Bağımlı temas",   kb)
+        tc(dbg, 1, 13, f_pct(depN, nearN),    color.new(nearN > 0 and depN * 100 >= nearN * 60 ? color.orange : color.gray, 40))
+        tc(dbg, 0, 14, "Ölen / Aktif seviye", kb)
+        tc(dbg, 1, 14, str.tostring(cntDead) + " / " + str.tostring(cntValid - cntDead), kb)
