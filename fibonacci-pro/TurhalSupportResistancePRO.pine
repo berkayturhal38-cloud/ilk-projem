@@ -1,0 +1,85 @@
+//@version=6
+// Turhal Smart S/R PRO (flat / mobile-safe)
+// Auto support & resistance: thick horizontal levels from swing pivots.
+// Author: berkayturhal38 | License: MPL-2.0
+indicator("Turhal Smart S/R PRO", "Turhal S/R", overlay=true, max_lines_count=50, max_labels_count=50)
+
+g = "Settings"
+pivotLen = input.int(15, "S/R Sensitivity", minval=1, maxval=200, group=g)
+wid = input.int(3, "Line Width", minval=1, maxval=5, group=g)
+resCol = input.color(#f23645, "Resistance", group=g)
+supCol = input.color(#ffffff, "Support", group=g)
+showLbl = input.bool(true, "Show Price Labels", group=g)
+
+ph = ta.pivothigh(pivotLen, pivotLen)
+pl = ta.pivotlow(pivotLen, pivotLen)
+
+var float r1 = na
+var float r2 = na
+var float r3 = na
+var float r4 = na
+r4 := na(ph) ? r4 : r3
+r3 := na(ph) ? r3 : r2
+r2 := na(ph) ? r2 : r1
+r1 := na(ph) ? r1 : ph
+
+var float s1 = na
+var float s2 = na
+var float s3 = na
+var float s4 = na
+s4 := na(pl) ? s4 : s3
+s3 := na(pl) ? s3 : s2
+s2 := na(pl) ? s2 : s1
+s1 := na(pl) ? s1 : pl
+
+var line lr1 = line.new(na, na, na, na, extend=extend.both, color=resCol, width=wid)
+var line lr2 = line.new(na, na, na, na, extend=extend.both, color=resCol, width=wid)
+var line lr3 = line.new(na, na, na, na, extend=extend.both, color=resCol, width=wid)
+var line lr4 = line.new(na, na, na, na, extend=extend.both, color=resCol, width=wid)
+var line ls1 = line.new(na, na, na, na, extend=extend.both, color=supCol, width=wid)
+var line ls2 = line.new(na, na, na, na, extend=extend.both, color=supCol, width=wid)
+var line ls3 = line.new(na, na, na, na, extend=extend.both, color=supCol, width=wid)
+var line ls4 = line.new(na, na, na, na, extend=extend.both, color=supCol, width=wid)
+
+line.set_xy1(lr1, bar_index - 1, r1)
+line.set_xy2(lr1, bar_index, r1)
+line.set_xy1(lr2, bar_index - 1, r2)
+line.set_xy2(lr2, bar_index, r2)
+line.set_xy1(lr3, bar_index - 1, r3)
+line.set_xy2(lr3, bar_index, r3)
+line.set_xy1(lr4, bar_index - 1, r4)
+line.set_xy2(lr4, bar_index, r4)
+line.set_xy1(ls1, bar_index - 1, s1)
+line.set_xy2(ls1, bar_index, s1)
+line.set_xy1(ls2, bar_index - 1, s2)
+line.set_xy2(ls2, bar_index, s2)
+line.set_xy1(ls3, bar_index - 1, s3)
+line.set_xy2(ls3, bar_index, s3)
+line.set_xy1(ls4, bar_index - 1, s4)
+line.set_xy2(ls4, bar_index, s4)
+
+var label pr1 = label.new(na, na, "", style=label.style_label_right, color=color.new(resCol, 100), textcolor=resCol, size=size.small)
+var label pr2 = label.new(na, na, "", style=label.style_label_right, color=color.new(resCol, 100), textcolor=resCol, size=size.small)
+var label pr3 = label.new(na, na, "", style=label.style_label_right, color=color.new(resCol, 100), textcolor=resCol, size=size.small)
+var label pr4 = label.new(na, na, "", style=label.style_label_right, color=color.new(resCol, 100), textcolor=resCol, size=size.small)
+var label ps1 = label.new(na, na, "", style=label.style_label_right, color=color.new(supCol, 100), textcolor=supCol, size=size.small)
+var label ps2 = label.new(na, na, "", style=label.style_label_right, color=color.new(supCol, 100), textcolor=supCol, size=size.small)
+var label ps3 = label.new(na, na, "", style=label.style_label_right, color=color.new(supCol, 100), textcolor=supCol, size=size.small)
+var label ps4 = label.new(na, na, "", style=label.style_label_right, color=color.new(supCol, 100), textcolor=supCol, size=size.small)
+
+label.set_xy(pr1, bar_index, r1)
+label.set_text(pr1, showLbl and not na(r1) ? "(" + str.tostring(r1, format.mintick) + ")" : "")
+label.set_xy(pr2, bar_index, r2)
+label.set_text(pr2, showLbl and not na(r2) ? "(" + str.tostring(r2, format.mintick) + ")" : "")
+label.set_xy(pr3, bar_index, r3)
+label.set_text(pr3, showLbl and not na(r3) ? "(" + str.tostring(r3, format.mintick) + ")" : "")
+label.set_xy(pr4, bar_index, r4)
+label.set_text(pr4, showLbl and not na(r4) ? "(" + str.tostring(r4, format.mintick) + ")" : "")
+label.set_xy(ps1, bar_index, s1)
+label.set_text(ps1, showLbl and not na(s1) ? "(" + str.tostring(s1, format.mintick) + ")" : "")
+label.set_xy(ps2, bar_index, s2)
+label.set_text(ps2, showLbl and not na(s2) ? "(" + str.tostring(s2, format.mintick) + ")" : "")
+label.set_xy(ps3, bar_index, s3)
+label.set_text(ps3, showLbl and not na(s3) ? "(" + str.tostring(s3, format.mintick) + ")" : "")
+label.set_xy(ps4, bar_index, s4)
+label.set_text(ps4, showLbl and not na(s4) ? "(" + str.tostring(s4, format.mintick) + ")" : "")

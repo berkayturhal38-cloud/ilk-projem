@@ -1,0 +1,127 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+// © berkayturhal38
+//@version=6
+// ============================================================================
+//  TURHAL TREND ENGINE  —  v1
+//  TEK GÖREV: Piyasa trend yönünü sınıflandırmak: YUKARI / AŞAĞI / YATAY.
+//  KURALLAR (kesin boolean, puanlama YOK):
+//    YUKARI = close > EMA200 + 0.5*ATR  VE  slopeATR > +0.10  VE  ADX >= 20
+//    AŞAĞI  = close < EMA200 - 0.5*ATR  VE  slopeATR < -0.10  VE  ADX >= 20
+//    YATAY  = diğer tüm durumlar (veri na iken de YATAY)
+//    slopeATR = (ema200 - ema200[slopeLen]) / ATR  (boyutsuz, sembol/TF taşınabilir)
+//    ADX yalnızca GÜÇ kapısıdır; DI+/DI- yön için KULLANILMAZ.
+//  HYSTERESIS: Yayınlanan durum ancak yeni ham durum confirmBars ARDIŞIK kapanmış
+//    barda aynı kalırsa değişir (aday+sayaç; seri bozulursa yeniden başlar).
+//  NON-REPAINT: Durum yalnızca barstate.isconfirmed'de güncellenir; canlı bar
+//    yayınlanan durumu DEĞİŞTİREMEZ. request.security YOK, lookahead YOK.
+//  YOK: LONG/SHORT sinyali, alarm, strateji, EMA500, Fib, S/R, BOS/CHoCH, score.
+//  License: MPL-2.0
+// ============================================================================
+indicator("Turhal Trend Engine v1", "Turhal Trend", overlay = true)
+
+// ============================================================================
+//  GİRDİLER
+// ============================================================================
+gM = "Motor"
+emaLen      = input.int(200,    "EMA Periyodu",                    minval = 1,   group = gM)
+atrLen      = input.int(14,     "ATR Periyodu",                    minval = 1,   group = gM)
+slopeLen    = input.int(10,     "Eğim Ölçüm Penceresi (bar)",      minval = 1,   group = gM)
+slopeThr    = input.float(0.10, "Eğim Eşiği (ATR birimi)",         minval = 0.0, step = 0.01, group = gM)
+bandK       = input.float(0.5,  "Nötr Bölge Yarı Genişliği (xATR)", minval = 0.0, step = 0.1,  group = gM)
+adxLen      = input.int(14,     "ADX Periyodu",                    minval = 1,   group = gM)
+adxThr      = input.float(20,   "ADX Trend Gücü Eşiği",            minval = 0.0, step = 1.0,  group = gM)
+confirmBars = input.int(2,      "Onay Barı (hysteresis)",          minval = 1,   group = gM)
+
+gV = "Görünüm"
+showPanel = input.bool(true, "Teşhis Panelini Göster", group = gV)
+showEma   = input.bool(true, "EMA200 Çizgisini Göster", group = gV)
+showBg    = input.bool(true, "Arka Plan Renklendirmesi", group = gV)
+
+// ============================================================================
+//  HESAPLAR  (grafik TF; request.security YOK)
+// ============================================================================
+ema200 = ta.ema(close, emaLen)
+atr    = ta.atr(atrLen)
+[_dip, _dim, adx] = ta.dmi(adxLen, adxLen)   // yalnızca adx kullanılır; DI'lar YÖN İÇİN KULLANILMAZ
+emaPast = ema200[slopeLen]
+
+// Veri hazır mı? (ilk barlarda na -> YATAY; runtime hatası oluşmaz)
+dataOK = not na(ema200) and not na(emaPast) and not na(atr) and atr > 0 and not na(adx)
+
+slopeATR = dataOK ? (ema200 - emaPast) / atr : na
+
+bullPos = dataOK and close > ema200 + bandK * atr
+bearPos = dataOK and close < ema200 - bandK * atr
+
+slopeUp   = dataOK and slopeATR > slopeThr
+slopeDown = dataOK and slopeATR < -slopeThr
+
+adxOK = dataOK and adx >= adxThr
+
+// Ham durum: +1 = YUKARI, -1 = AŞAĞI, 0 = YATAY/BELİRSİZ
+rawState = bullPos and slopeUp and adxOK ? 1 : bearPos and slopeDown and adxOK ? -1 : 0
+
+// ============================================================================
+//  HYSTERESIS  (aday + ardışık kapanmış bar sayacı; yalnızca isconfirmed'de)
+//   - Ham durum yayınlananla aynıysa bekleyen aday temizlenir.
+//   - Ham durum mevcut adayla aynıysa sayaç artar; confirmBars'a ulaşınca yayınlanır.
+//   - Ham durum yeni bir adaysa aday değişir, sayaç 1'den başlar.
+// ============================================================================
+var int  pubState  = 0      // yayınlanan trend durumu
+var int  candState = 0      // bekleyen aday durum
+var int  candCnt   = 0      // adayın ardışık kapanmış bar sayısı
+var bool hasCand   = false
+
+if barstate.isconfirmed
+    if rawState == pubState
+        hasCand := false
+        candCnt := 0
+    else if hasCand and rawState == candState
+        candCnt := candCnt + 1
+        if candCnt >= confirmBars
+            pubState := rawState
+            hasCand := false
+            candCnt := 0
+    else
+        candState := rawState
+        candCnt := 1
+        hasCand := true
+        if candCnt >= confirmBars     // confirmBars = 1 ise aday anında yayınlanır
+            pubState := rawState
+            hasCand := false
+            candCnt := 0
+
+// ============================================================================
+//  GÖRSELLER  (sade: EMA çizgisi + soluk arka plan + panel; başka çizim YOK)
+// ============================================================================
+plot(showEma ? ema200 : na, "EMA 200", color = color.new(color.orange, 0), linewidth = 2)
+bgcolor(showBg ? (pubState == 1 ? color.new(color.green, 92) : pubState == -1 ? color.new(color.red, 92) : color.new(color.gray, 95)) : na)
+
+// ============================================================================
+//  TEŞHİS PANELİ  (TREND = onaylı durum; diğer satırlar "neden" teşhisi)
+// ============================================================================
+tc(table tb, int c, int r, string s, color bg) => table.cell(tb, c, r, s, text_color = color.white, bgcolor = bg, text_size = size.small)
+
+trendTxt = pubState == 1 ? "YUKARI" : pubState == -1 ? "AŞAĞI" : "YATAY"
+trendCol = pubState == 1 ? color.new(color.green, 20) : pubState == -1 ? color.new(color.red, 20) : color.new(color.gray, 30)
+posTxt   = bullPos ? "BULL (>+" + str.tostring(bandK, "0.0") + " ATR)" : bearPos ? "BEAR (<-" + str.tostring(bandK, "0.0") + " ATR)" : "NÖTR BÖLGE"
+slopeTxt = na(slopeATR) ? "-" : str.tostring(slopeATR, "0.000") + "  (eşik ±" + str.tostring(slopeThr, "0.00") + ")"
+adxTxt   = na(adx) ? "-" : str.tostring(adx, "0.0") + "  (eşik " + str.tostring(adxThr, "0") + ")"
+candTxt  = hasCand ? (candState == 1 ? "YUKARI" : candState == -1 ? "AŞAĞI" : "YATAY") + "  " + str.tostring(candCnt) + "/" + str.tostring(confirmBars) : "-"
+
+hd = color.new(color.black, 10)
+kb = color.new(color.black, 25)
+var table dbg = table.new(position.top_right, 2, 6, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+if showPanel
+    tc(dbg, 0, 0, "TURHAL TREND",     hd)
+    tc(dbg, 1, 0, "v1",               hd)
+    tc(dbg, 0, 1, "TREND",            kb)
+    tc(dbg, 1, 1, trendTxt,           trendCol)
+    tc(dbg, 0, 2, "Konum",            kb)
+    tc(dbg, 1, 2, posTxt,             kb)
+    tc(dbg, 0, 3, "Eğim (slopeATR)",  kb)
+    tc(dbg, 1, 3, slopeTxt,           kb)
+    tc(dbg, 0, 4, "ADX",              kb)
+    tc(dbg, 1, 4, adxTxt,             kb)
+    tc(dbg, 0, 5, "Bekleyen aday",    kb)
+    tc(dbg, 1, 5, candTxt,            kb)

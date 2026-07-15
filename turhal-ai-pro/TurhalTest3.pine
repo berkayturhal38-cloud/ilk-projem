@@ -1,0 +1,133 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+// © berkayturhal38
+//@version=6
+// ============================================================================
+//  TURHAL TEST 3  —  v2.1  (BASELINE'A DÖNÜŞ: TEST 2 v2.0 MANTIĞI BİREBİR)
+//  v2'deki EMA200/EMA500 rejim filtresi KALDIRILDI (çıkışları kilitleyip 11/11
+//  zarar üretmişti). EMA500 grafikte YALNIZCA GÖRSEL; hiçbir entry/exit koşulunu
+//  filtrelemez. İşlem mantığı Test 2 v2.0 ile birebir aynıdır.
+//  GİRİŞ: LONG = open < ema200 and close > ema200; SHORT = open > ema200 and close < ema200.
+//         Yalnızca mumun GÖVDESİ EMA200'ü keser. Fitil / önceki kapanış / kalıcı state YOK.
+//  ÇIKIŞ: TP/SL YOK. Pozisyon yalnızca ters sinyalin reversal'ı ile kapanır (always-in-market).
+//  Bu dosya bağımsızdır; Test 1, Test 2, Lite veya diğer dosyalara dokunmaz.
+//  License: MPL-2.0
+// ============================================================================
+strategy("Turhal Test 3", "Turhal Test 3", overlay = true, initial_capital = 10000, default_qty_type = strategy.fixed, default_qty_value = 1, commission_type = strategy.commission.percent, commission_value = 0.04, slippage = 1, pyramiding = 0, calc_on_every_tick = false)
+// NOT: Komisyon ve slippage, TradingView'de Ayarlar > "Özellikler (Properties)"
+// sekmesinden de değiştirilebilir. strategy() içinde sabit (const) olmak zorundadır.
+
+// ============================================================================
+//  GİRDİLER
+// ============================================================================
+gT = "EMA"
+emaLen     = input.int(200, "EMA Sinyal Periyodu",              minval = 1, group = gT)
+emaSlowLen = input.int(500, "EMA 500 (yalnızca görsel)",        minval = 1, group = gT)
+
+gN = "Boyutlandırma"
+notionalUSDT = input.float(100, "İşlem Nominal Büyüklüğü (USDT)", minval = 1, step = 10, group = gN)
+
+gD = "Test Aralığı"
+startDate = input.time(timestamp("01 Jan 2018 00:00 +0000"), "Başlangıç Tarihi", group = gD)
+endDate   = input.time(timestamp("01 Jan 2100 00:00 +0000"), "Bitiş Tarihi", group = gD)
+
+gV = "Görünüm"
+showPanel = input.bool(true, "Debug Panelini Göster", group = gV)
+
+// ============================================================================
+//  GİRİŞ SİNYALİ  (Test 2 Model 2 — tek mum gövde kesişimi, repaint'siz)
+//  LONG  = mum EMA200 altında açılıp üstünde kapanır (open < ema and close > ema).
+//  SHORT = mum EMA200 üstünde açılıp altında kapanır (open > ema and close < ema).
+//  Fitil (high/low), önceki kapanış ve kalıcı state KULLANILMAZ.
+//  emaSlow (EMA500) YALNIZCA GÖRSEL — hiçbir koşulda kullanılmaz.
+// ============================================================================
+ema     = ta.ema(close, emaLen)
+emaSlow = ta.ema(close, emaSlowLen)
+active  = time >= startDate and time <= endDate
+
+longSig  = open < ema and close > ema
+shortSig = open > ema and close < ema
+
+// Pozisyon guard'ları Test 2 ile birebir aynı (aynı yön tekrar açılmaz; ters yön reversal yapar)
+goLong  = active and longSig  and strategy.position_size <= 0
+goShort = active and shortSig and strategy.position_size >= 0
+
+// Sabit ~USDT nominal boyut: qty = notional / fiyat (öz sermayeye bağlı DEĞİL, compounding YOK)
+qtyCalc = notionalUSDT / close
+
+if goLong
+    strategy.entry("LONG", strategy.long, qty = qtyCalc)
+else if goShort
+    strategy.entry("SHORT", strategy.short, qty = qtyCalc)
+
+// ============================================================================
+//  POZİSYON AÇILIŞ TESPİTİ  (yalnızca teşhis: nOpen + giriş nominali)
+//  Çıkış YOK — pozisyon ters sinyalin reversal'ı ile kapanır (always-in-market).
+// ============================================================================
+var float entryNom = na   // GİRİŞ anındaki gerçekleşen nominal (USDT)
+justLong  = strategy.position_size > 0 and strategy.position_size[1] <= 0
+justShort = strategy.position_size < 0 and strategy.position_size[1] >= 0
+if justLong or justShort
+    entryNom := math.abs(strategy.position_size) * strategy.position_avg_price
+
+// ============================================================================
+//  SAYAÇLAR
+// ============================================================================
+var int nLongCmd  = 0
+var int nShortCmd = 0
+var int nOpen     = 0   // GERÇEK yeni pozisyon/yön açılışı (justLong or justShort)
+nLongCmd  := nLongCmd  + (goLong  ? 1 : 0)
+nShortCmd := nShortCmd + (goShort ? 1 : 0)
+nOpen     := nOpen     + ((justLong or justShort) ? 1 : 0)
+nEntered  = nLongCmd + nShortCmd
+
+// ============================================================================
+//  GRAFİK GÖRSELLERİ
+// ============================================================================
+plot(ema,     "EMA 200 Sinyal",           color = color.new(color.orange, 0), linewidth = 2)
+plot(emaSlow, "EMA 500 (yalnızca görsel)", color = color.new(color.purple, 0), linewidth = 2)
+plotshape(goLong,  "LONG",  shape.triangleup,   location.belowbar, color.new(color.green, 0), size = size.small, text = "LONG")
+plotshape(goShort, "SHORT", shape.triangledown, location.abovebar, color.new(color.red, 0),   size = size.small, text = "SHORT")
+bgcolor(color.new(strategy.position_size > 0 ? color.green : strategy.position_size < 0 ? color.red : color.gray, 92))
+
+// ============================================================================
+//  DEBUG PANELİ  (Test 2 paneli birebir + salt-GÖRSEL Rejim bilgi satırı)
+//   - Fark2 = Toplam komut - Yeni açılış = 0 (son barda bekleyen emir varsa 1).
+//   - "Yeni açılış" justLong/justShort ile gerçek pozisyon/yön açılışını sayar.
+//   - Saf reversal: pozisyon ters sinyale kadar açık kalır (Açık işlem = 0 veya 1).
+//   - "Rejim" satırı yalnızca bilgi amaçlıdır; hiçbir işlem koşulunu ETKİLEMEZ.
+// ============================================================================
+gap2   = nEntered - nOpen
+posTxt = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT"
+regTxt = ema > emaSlow ? "BULL (200>500)" : ema < emaSlow ? "BEAR (200<500)" : "NÖTR"
+regCol = ema > emaSlow ? color.new(color.green, 40) : ema < emaSlow ? color.new(color.red, 40) : color.new(color.gray, 40)
+nomTxt = na(entryNom) ? "-" : str.tostring(entryNom, "0.0")
+tc(table tb, int c, int r, string s, color bg) => table.cell(tb, c, r, s, text_color = color.white, bgcolor = bg, text_size = size.small)
+
+hd = color.new(color.black, 10)
+kb = color.new(color.black, 25)
+var table dbg = table.new(position.top_right, 2, 12, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+if showPanel
+    tc(dbg, 0, 0,  "TURHAL TEST 3",       hd)
+    tc(dbg, 1, 0,  "v2.1 (baseline)",     hd)
+    tc(dbg, 0, 1,  "EMA periyotları",     kb)
+    tc(dbg, 1, 1,  str.tostring(emaLen) + " / " + str.tostring(emaSlowLen), kb)
+    tc(dbg, 0, 2,  "Rejim (salt görsel)", kb)
+    tc(dbg, 1, 2,  regTxt,                regCol)
+    tc(dbg, 0, 3,  "LONG komut",          kb)
+    tc(dbg, 1, 3,  str.tostring(nLongCmd), kb)
+    tc(dbg, 0, 4,  "SHORT komut",         kb)
+    tc(dbg, 1, 4,  str.tostring(nShortCmd), kb)
+    tc(dbg, 0, 5,  "Toplam komut",        kb)
+    tc(dbg, 1, 5,  str.tostring(nEntered), color.new(color.blue, 40))
+    tc(dbg, 0, 6,  "Yeni açılış (justL/S)", kb)
+    tc(dbg, 1, 6,  str.tostring(nOpen),   color.new(color.blue, 40))
+    tc(dbg, 0, 7,  "Fark2 (komut-açılış)", kb)
+    tc(dbg, 1, 7,  str.tostring(gap2),    color.new(gap2 == 0 or gap2 == 1 ? color.green : color.red, 40))
+    tc(dbg, 0, 8,  "Açık işlem",          kb)
+    tc(dbg, 1, 8,  str.tostring(strategy.opentrades),   kb)
+    tc(dbg, 0, 9,  "Durum",               kb)
+    tc(dbg, 1, 9,  posTxt,                kb)
+    tc(dbg, 0, 10, "Giriş nominali $",    kb)
+    tc(dbg, 1, 10, nomTxt,                color.new(color.blue, 40))
+    tc(dbg, 0, 11, "Öz sermaye",          kb)
+    tc(dbg, 1, 11, str.tostring(strategy.equity, "0"), color.new(strategy.equity < strategy.initial_capital ? color.red : color.green, 40))

@@ -1,0 +1,290 @@
+//@version=6
+// ============================================================================
+//  Turhal AI PRO Lite — STRATEGY (Backtest)
+//  Turhal AI PRO Lite indikatörünün GERÇEK sinyal motorunu birebir kullanır:
+//  swing/BOS/CHoCH, ATR + hacim filtreleri, MTF, prim/iskonto, confidence,
+//  ATR tabanlı SL ve TP1/TP2/TP3. Sinyaller strategy.entry/strategy.exit ile
+//  test edilir. Komisyon + slippage + tarih filtresi input olarak ayarlanır.
+//  NON-REPAINT: kırılımlar barstate.isconfirmed'da kesinleşir, MTF
+//  lookahead_off, process_orders_on_close=true (emirler bar kapanışında).
+//  Bu dosya mevcut Lite indikatörünü DEĞİŞTİRMEZ; tamamen ayrıdır.
+//  Author: berkayturhal38 | License: MPL-2.0
+// ============================================================================
+strategy("Turhal AI PRO Lite — Strategy", "Turhal AI Lite ST", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 100, commission_type = strategy.commission.percent, commission_value = 0.04, slippage = 1, pyramiding = 0, calc_on_every_tick = false, process_orders_on_close = true, close_entries_rule = "ANY")
+// NOT: Komisyon ve slippage TradingView'de ayarlar > "Özellikler (Properties)" sekmesinden
+// değiştirilir (Pine, bunları strategy() içinde input olarak kabul etmez; const olmalı).
+
+// ---- BACKTEST / RİSK --------------------------------------------------------
+gBT = "Backtest / Risk"
+useDates  = input.bool(false, "Tarih Filtresi Kullan", group = gBT)
+startDate = input.time(timestamp("2020-01-01 00:00 +0000"), "Başlangıç Tarihi", group = gBT)
+endDate   = input.time(timestamp("2099-01-01 00:00 +0000"), "Bitiş Tarihi", group = gBT)
+tradeDir  = input.string("Her İkisi", "İşlem Yönü", options = ["Her İkisi", "Sadece Long", "Sadece Short"], group = gBT)
+tp1Pct    = input.int(40, "TP1'de kapat (%)", minval = 1, maxval = 100, group = gBT)
+tp2Pct    = input.int(30, "TP2'de kapat (%)", minval = 1, maxval = 100, group = gBT)
+useBE     = input.bool(true, "TP1 sonrası SL'yi girişe çek (break-even)", group = gBT)
+showMetrics = input.bool(true, "Metrik Panelini Göster", group = gBT)
+showDebug   = input.bool(true, "Debug Sayaçlarını Göster (geçici)", group = gBT)
+
+// ---- SİNYAL MOTORU GİRDİLERİ  (Lite ile birebir aynı) -----------------------
+gS = "Yapı (Structure)"
+swingLen   = input.int(10, "Swing Length", minval = 2, maxval = 100, group = gS)
+showSwings = input.bool(true, "Swing HH/LL Göster", group = gS)
+showBreaks = input.bool(true, "BOS / CHoCH Göster", group = gS)
+
+gF = "Filtreler"
+useATR  = input.bool(true, "ATR Güçlü Kırılım Filtresi", group = gF)
+atrLen  = input.int(14, "ATR Length", minval = 1, group = gF)
+atrMult = input.float(0.7, "Min Body / ATR", minval = 0.0, step = 0.1, group = gF)
+useVol  = input.bool(true, "Hacim Filtresi", group = gF)
+volLen  = input.int(20, "Volume MA Length", minval = 1, group = gF)
+volMult = input.float(1.2, "Min Volume / MA", minval = 0.0, step = 0.1, group = gF)
+
+gM = "Çoklu Zaman (MTF)"
+mtfFilter = input.bool(true, "MTF Uyum Şartı", group = gM)
+htfTf1    = input.timeframe("60",  "Üst Zaman 1", group = gM)
+htfTf2    = input.timeframe("240", "Üst Zaman 2", group = gM)
+emaLen    = input.int(50, "HTF EMA Length", minval = 1, group = gM)
+
+gPD = "Prim / İskonto"
+showPD = input.bool(true, "Prim/İskonto Bölgesi Göster", group = gPD)
+
+gE = "Giriş Motoru"
+showEntry      = input.bool(true, "Giriş Oklarını Göster", group = gE)
+entryThreshold = input.int(70, "Min Güven (%)", minval = 0, maxval = 100, group = gE)
+needDiscount   = input.bool(false, "Long İskonto / Short Prim (kırılım girişinde AÇIK => 0 işlem)", group = gE)
+slAtrMult      = input.float(1.0, "SL ATR Payı", minval = 0.0, step = 0.1, group = gE)
+rr1 = input.float(1.0, "TP1 (R)", minval = 0.1, step = 0.1, group = gE)
+rr2 = input.float(2.0, "TP2 (R)", minval = 0.1, step = 0.1, group = gE)
+rr3 = input.float(3.0, "TP3 (R)", minval = 0.1, step = 0.1, group = gE)
+
+gC = "Renkler"
+bullCol  = input.color(#26a69a, "Bullish", group = gC)
+bearCol  = input.color(#ef5350, "Bearish", group = gC)
+swingCol = input.color(#787b86, "Swing", group = gC)
+premCol  = input.color(#ef5350, "Prim", group = gC)
+discCol  = input.color(#26a69a, "İskonto", group = gC)
+
+// ---- FİLTRELER --------------------------------------------------------------
+atrVal   = ta.atr(atrLen)
+bodySize = math.abs(close - open)
+volMA    = ta.sma(volume, volLen)
+atrOK    = not useATR or (not na(atrVal) and bodySize >= atrVal * atrMult)
+volOK    = not useVol or na(volume) or (not na(volMA) and volume >= volMA * volMult)
+strong   = atrOK and volOK
+
+// ---- MTF (non-repaint: lookahead_off) --------------------------------------
+htf1Bull = request.security(syminfo.tickerid, htfTf1, close > ta.ema(close, emaLen), lookahead = barmerge.lookahead_off)
+htf2Bull = request.security(syminfo.tickerid, htfTf2, close > ta.ema(close, emaLen), lookahead = barmerge.lookahead_off)
+bullMTFok = not mtfFilter or (htf1Bull and htf2Bull)
+bearMTFok = not mtfFilter or (not htf1Bull and not htf2Bull)
+
+// ---- SWING / YAPI -----------------------------------------------------------
+ph = ta.pivothigh(swingLen, swingLen)
+pl = ta.pivotlow(swingLen, swingLen)
+var float lastPH = na
+var float lastPL = na
+lastPH := na(ph) ? lastPH : ph
+lastPL := na(pl) ? lastPL : pl
+
+plotshape(showSwings and not na(ph), title = "Swing High", style = shape.triangledown, location = location.abovebar, color = swingCol, offset = -swingLen, size = size.tiny)
+plotshape(showSwings and not na(pl), title = "Swing Low",  style = shape.triangleup,   location = location.belowbar, color = swingCol, offset = -swingLen, size = size.tiny)
+
+var float upLevel = na
+var bool  upBroken = false
+var float dnLevel = na
+var bool  dnBroken = false
+var int   trend = 0
+upLevel  := na(ph) ? upLevel : ph
+upBroken := na(ph) ? upBroken : false
+dnLevel  := na(pl) ? dnLevel : pl
+dnBroken := na(pl) ? dnBroken : false
+
+bullBreak = not na(upLevel) and not upBroken and barstate.isconfirmed and close > upLevel and strong and bullMTFok
+bearBreak = not na(dnLevel) and not dnBroken and barstate.isconfirmed and close < dnLevel and strong and bearMTFok
+isChochUp = bullBreak and trend == -1
+isChochDn = bearBreak and trend == 1
+upBroken := bullBreak ? true : upBroken
+dnBroken := bearBreak ? true : dnBroken
+trend    := bullBreak ? 1 : bearBreak ? -1 : trend
+
+plotshape(showBreaks and bullBreak and not isChochUp, title = "BOS Up",   style = shape.triangleup,   location = location.belowbar, color = bullCol,     text = "BOS",   textcolor = color.white, size = size.tiny)
+plotshape(showBreaks and bearBreak and not isChochDn, title = "BOS Down", style = shape.triangledown, location = location.abovebar, color = bearCol,     text = "BOS",   textcolor = color.white, size = size.tiny)
+plotshape(showBreaks and isChochUp, title = "CHoCH Up",   style = shape.diamond, location = location.belowbar, color = color.yellow, text = "CHoCH", textcolor = color.white, size = size.tiny)
+plotshape(showBreaks and isChochDn, title = "CHoCH Down", style = shape.diamond, location = location.abovebar, color = color.yellow, text = "CHoCH", textcolor = color.white, size = size.tiny)
+
+// ---- PRİM / İSKONTO ---------------------------------------------------------
+pdEq = (not na(lastPH) and not na(lastPL)) ? (lastPH + lastPL) / 2 : na
+inDiscount = not na(pdEq) and close < pdEq
+inPremium  = not na(pdEq) and close > pdEq
+pHi = plot(showPD ? lastPH : na, "Range High", color = color.new(premCol, 55), style = plot.style_linebr)
+pEq = plot(showPD ? pdEq   : na, "Equilibrium", color = color.new(color.gray, 30), style = plot.style_linebr)
+pLo = plot(showPD ? lastPL : na, "Range Low", color = color.new(discCol, 55), style = plot.style_linebr)
+fill(pHi, pEq, color = color.new(premCol, 90), title = "Prim")
+fill(pEq, pLo, color = color.new(discCol, 90), title = "İskonto")
+
+// ---- CONFIDENCE (birebir aynı) ---------------------------------------------
+al1    = trend == 1 ? htf1Bull : trend == -1 ? not htf1Bull : false
+al2    = trend == 1 ? htf2Bull : trend == -1 ? not htf2Bull : false
+zoneOK = trend == 1 ? inDiscount : trend == -1 ? inPremium : false
+cMTF   = (al1 ? 20.0 : 0.0) + (al2 ? 25.0 : 0.0)
+cDisp  = (not na(atrVal) and atrVal > 0) ? math.min(25.0, bodySize / atrVal * 17.0) : 0.0
+cVol   = (not na(volume) and not na(volMA) and volMA > 0) ? math.min(15.0, volume / volMA * 8.0) : 0.0
+cZone  = zoneOK ? 15.0 : 0.0
+conf   = trend == 0 ? 0 : int(math.min(100, math.round(cMTF + cDisp + cVol + cZone)))
+
+// ---- PLAN: giriş / SL / TP (birebir aynı) ----------------------------------
+planEntry = trend == 0 ? na : close
+planSL = trend == 1 ? ((na(lastPL) ? low : math.min(lastPL, low)) - (na(atrVal) ? 0.0 : atrVal * slAtrMult)) : trend == -1 ? ((na(lastPH) ? high : math.max(lastPH, high)) + (na(atrVal) ? 0.0 : atrVal * slAtrMult)) : na
+planRisk = trend == 1 ? (planEntry - planSL) : trend == -1 ? (planSL - planEntry) : na
+validPlan = not na(planRisk) and planRisk > 0
+planTP1 = not validPlan ? na : trend == 1 ? planEntry + planRisk * rr1 : planEntry - planRisk * rr1
+planTP2 = not validPlan ? na : trend == 1 ? planEntry + planRisk * rr2 : planEntry - planRisk * rr2
+planTP3 = not validPlan ? na : trend == 1 ? planEntry + planRisk * rr3 : planEntry - planRisk * rr3
+
+// ---- GERÇEK SİNYALLER (birebir aynı) ---------------------------------------
+longSig  = showEntry and bullBreak and (not needDiscount or inDiscount) and conf >= entryThreshold and validPlan
+shortSig = showEntry and bearBreak and (not needDiscount or inPremium)  and conf >= entryThreshold and validPlan
+plotshape(longSig,  title = "LONG",  style = shape.labelup,   location = location.belowbar, color = bullCol, text = "LONG",  textcolor = color.white, size = size.small)
+plotshape(shortSig, title = "SHORT", style = shape.labeldown, location = location.abovebar, color = bearCol, text = "SHORT", textcolor = color.white, size = size.small)
+
+// ============================================================================
+//  STRATEGY EMİRLERİ
+// ============================================================================
+inDate     = not useDates or (time >= startDate and time <= endDate)
+allowLong  = tradeDir != "Sadece Short"
+allowShort = tradeDir != "Sadece Long"
+flat       = strategy.position_size == 0
+
+var float posEntry = na
+var float posSL = na
+var float posT1 = na
+var float posT2 = na
+var float posT3 = na
+var bool  beDone = false
+
+goLong  = longSig  and inDate and allowLong  and flat
+goShort = shortSig and inDate and allowShort and flat
+
+// ---- DEBUG SAYAÇLARI (geçici) — sinyalin hangi aşamada öldüğünü gösterir ----
+lZoneOK = bullBreak and (not needDiscount or inDiscount)
+sZoneOK = bearBreak and (not needDiscount or inPremium)
+var int nBull = 0
+var int nBear = 0
+var int nLZone = 0
+var int nSZone = 0
+var int nLong = 0
+var int nShort = 0
+var int nEntered = 0
+nBull    := nBull + (bullBreak ? 1 : 0)
+nBear    := nBear + (bearBreak ? 1 : 0)
+nLZone   := nLZone + (lZoneOK ? 1 : 0)
+nSZone   := nSZone + (sZoneOK ? 1 : 0)
+nLong    := nLong + (longSig ? 1 : 0)
+nShort   := nShort + (shortSig ? 1 : 0)
+nEntered := nEntered + ((goLong or goShort) ? 1 : 0)
+
+if goLong
+    posEntry := close
+    posSL := planSL
+    posT1 := planTP1
+    posT2 := planTP2
+    posT3 := planTP3
+    beDone := false
+    strategy.entry("Long", strategy.long)
+    strategy.exit("L-TP1", "Long", qty_percent = tp1Pct, stop = planSL, limit = planTP1)
+    strategy.exit("L-TP2", "Long", qty_percent = tp2Pct, stop = planSL, limit = planTP2)
+    strategy.exit("L-TP3", "Long", stop = planSL, limit = planTP3)
+
+if goShort
+    posEntry := close
+    posSL := planSL
+    posT1 := planTP1
+    posT2 := planTP2
+    posT3 := planTP3
+    beDone := false
+    strategy.entry("Short", strategy.short)
+    strategy.exit("S-TP1", "Short", qty_percent = tp1Pct, stop = planSL, limit = planTP1)
+    strategy.exit("S-TP2", "Short", qty_percent = tp2Pct, stop = planSL, limit = planTP2)
+    strategy.exit("S-TP3", "Short", stop = planSL, limit = planTP3)
+
+// TP1 sonrası SL'yi girişe çek (break-even) — bir kez, kalan pozisyon için
+if strategy.position_size > 0 and useBE and not beDone and not na(posT1) and high >= posT1
+    beDone := true
+    strategy.exit("L-TP2", "Long", qty_percent = tp2Pct, stop = posEntry, limit = posT2)
+    strategy.exit("L-TP3", "Long", stop = posEntry, limit = posT3)
+if strategy.position_size < 0 and useBE and not beDone and not na(posT1) and low <= posT1
+    beDone := true
+    strategy.exit("S-TP2", "Short", qty_percent = tp2Pct, stop = posEntry, limit = posT2)
+    strategy.exit("S-TP3", "Short", stop = posEntry, limit = posT3)
+if flat
+    beDone := false
+
+// Not: strateji sürümünde alarmlar emir gerçekleşmelerinden (order fills) gelir;
+// alertcondition strateji içinde çalışmaz. Sinyal alarmı isteyen Lite indikatörünü kullanır.
+
+// ============================================================================
+//  METRİK PANELİ  (Strategy Tester'daki değerlerin özeti)
+// ============================================================================
+f_money(float v) =>
+    a = math.abs(v)
+    s = v < 0 ? "-" : ""
+    a >= 1e9 ? s + str.tostring(a / 1e9, "0.00") + "B" : a >= 1e6 ? s + str.tostring(a / 1e6, "0.00") + "M" : a >= 1e3 ? s + str.tostring(a / 1e3, "0.00") + "K" : s + str.tostring(a, "0.00")
+
+tcm(table tb, int c, int r, string s, color bg) => table.cell(tb, c, r, s, text_color = color.white, bgcolor = bg, text_size = size.small)
+
+closed  = strategy.closedtrades
+wins    = strategy.wintrades
+losses  = strategy.losstrades
+winRate = closed > 0 ? int(math.round(wins * 100.0 / closed)) : 0
+gp      = strategy.grossprofit
+gl      = strategy.grossloss
+pf      = gl > 0 ? gp / gl : (gp > 0 ? 999.0 : 0.0)
+netP    = strategy.netprofit
+netPct  = strategy.initial_capital > 0 ? netP / strategy.initial_capital * 100 : 0.0
+ddPct   = strategy.initial_capital > 0 ? strategy.max_drawdown / strategy.initial_capital * 100 : 0.0
+expc    = closed > 0 ? netP / closed : 0.0
+
+hd = color.new(color.black, 10)
+kb = color.new(color.black, 25)
+wrCol = winRate >= 55 ? bullCol : winRate >= 45 ? color.new(#ffb300, 0) : bearCol
+pfCol = pf >= 1.75 ? bullCol : pf >= 1.0 ? color.new(#ffb300, 0) : bearCol
+npCol = netP >= 0 ? bullCol : bearCol
+var table perf = table.new(position.bottom_right, 2, 8, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+if showMetrics and barstate.islast
+    tcm(perf, 0, 0, "BACKTEST", hd)
+    tcm(perf, 1, 0, str.tostring(closed) + " işlem", hd)
+    tcm(perf, 0, 1, "Kazanma %", kb)
+    tcm(perf, 1, 1, str.tostring(winRate) + " %", color.new(wrCol, 25))
+    tcm(perf, 0, 2, "Profit Factor", kb)
+    tcm(perf, 1, 2, str.tostring(pf, "0.00"), color.new(pfCol, 25))
+    tcm(perf, 0, 3, "Net Kâr", kb)
+    tcm(perf, 1, 3, f_money(netP) + " (" + str.tostring(netPct, "0.0") + "%)", color.new(npCol, 25))
+    tcm(perf, 0, 4, "Max Drawdown", kb)
+    tcm(perf, 1, 4, f_money(strategy.max_drawdown) + " (" + str.tostring(ddPct, "0.0") + "%)", color.new(bearCol, 25))
+    tcm(perf, 0, 5, "Beklenti/işlem", kb)
+    tcm(perf, 1, 5, f_money(expc), kb)
+    tcm(perf, 0, 6, "Kazanan / Kaybeden", kb)
+    tcm(perf, 1, 6, str.tostring(wins) + " / " + str.tostring(losses), kb)
+    tcm(perf, 0, 7, "Gross K / Z", kb)
+    tcm(perf, 1, 7, f_money(gp) + " / " + f_money(gl), kb)
+
+// ---- DEBUG PANELİ (geçici) --------------------------------------------------
+var table dbg = table.new(position.top_left, 2, 8, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+if showDebug and barstate.islast
+    tcm(dbg, 0, 0, "DEBUG", hd)
+    tcm(dbg, 1, 0, "sayı", hd)
+    tcm(dbg, 0, 1, "bullBreak", kb)
+    tcm(dbg, 1, 1, str.tostring(nBull), kb)
+    tcm(dbg, 0, 2, "bearBreak", kb)
+    tcm(dbg, 1, 2, str.tostring(nBear), kb)
+    tcm(dbg, 0, 3, "bull + zone", kb)
+    tcm(dbg, 1, 3, str.tostring(nLZone), kb)
+    tcm(dbg, 0, 4, "bear + zone", kb)
+    tcm(dbg, 1, 4, str.tostring(nSZone), kb)
+    tcm(dbg, 0, 5, "longSig", kb)
+    tcm(dbg, 1, 5, str.tostring(nLong), color.new(nLong > 0 ? bullCol : bearCol, 25))
+    tcm(dbg, 0, 6, "shortSig", kb)
+    tcm(dbg, 1, 6, str.tostring(nShort), color.new(nShort > 0 ? bearCol : bearCol, 25))
+    tcm(dbg, 0, 7, "girilen işlem", kb)
+    tcm(dbg, 1, 7, str.tostring(nEntered), color.new(nEntered > 0 ? bullCol : bearCol, 25))

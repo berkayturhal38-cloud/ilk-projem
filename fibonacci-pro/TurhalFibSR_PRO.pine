@@ -1,0 +1,415 @@
+//@version=6
+// Turhal Auto Fibonacci PRO (flat / mobile-safe)
+// Author: berkayturhal38 | License: MPL-2.0
+indicator("Turhal Auto Fibonacci PRO", "Turhal Fib", overlay=true, max_lines_count=60, max_labels_count=60, max_boxes_count=20)
+
+g = "Swing / Trend"
+swingMode = input.string("Auto", "Swing Mode", options=["Auto", "Manual"], group=g, tooltip="Manual: set the high/low prices yourself (drag them on the chart).")
+manualHigh = input.price(100.0, "Manual High", group=g, confirm=true)
+manualLow = input.price(50.0, "Manual Low", group=g, confirm=true)
+swingLook = input.int(60, "Swing Lookback (Auto)", minval=5, maxval=500, group=g)
+dirMode = input.string("Auto", "Direction", options=["Auto", "Up", "Down"], group=g)
+
+gv = "Style"
+theme = input.string("Dark", "Theme", options=["Dark", "Light"], group=gv)
+extMode = input.string("Both", "Extend", options=["Both", "Right", "Left"], group=gv)
+reverse = input.bool(false, "Reverse (Karsit)", group=gv)
+lineW = input.int(1, "Level Line Width", minval=1, maxval=4, group=gv)
+showFill = input.bool(true, "Fill Zones", group=gv)
+fillT = input.int(85, "Zone Transparency", minval=50, maxval=98, group=gv)
+showConn = input.bool(true, "Show Connector Line", group=gv)
+showLbl = input.bool(true, "Show Labels", group=gv)
+lblSizeStr = input.string("Tiny", "Label Size", options=["Tiny", "Small", "Normal", "Large"], group=gv)
+labelOff = input.int(4, "Label Offset (bars)", minval=0, maxval=30, group=gv)
+showMarkers = input.bool(true, "Show Swing H/L Markers", group=gv)
+hlBg = input.bool(true, "Highlight Golden Zone Background", group=gv)
+
+gl = "Levels"
+showExt = input.bool(true, "Show Extensions (1.272 ... 4.764)", group=gl)
+showUpper = input.bool(true, "Show Upper Targets (-0.236 ... -1.0)", group=gl)
+showUpperLbl = input.bool(false, "Upper Target Labels", group=gl)
+
+gc = "Colors"
+c0 = input.color(#787b86, "0.0", group=gc)
+c236 = input.color(#f23645, "0.236", group=gc)
+c382 = input.color(#ff9800, "0.382", group=gc)
+c5 = input.color(#4caf50, "0.5", group=gc)
+c618 = input.color(#00bcd4, "0.618", group=gc)
+c786 = input.color(#2962ff, "0.786", group=gc)
+c1 = input.color(#787b86, "1.0", group=gc)
+goldCol = input.color(#ffd700, "Golden Zone", group=gc)
+ceCol = input.color(#e91e63, "Extensions", group=gc)
+upCol = input.color(#26a69a, "Upper Targets", group=gc)
+htfCol = input.color(#ffeb3b, "HTF Confluence", group=gc)
+
+gm = "Multi-Timeframe"
+showMtf = input.bool(true, "Show HTF 0.5 / 0.618", group=gm)
+mtfTf = input.timeframe("240", "Higher Timeframe", group=gm)
+
+gt = "Info Panel"
+showTable = input.bool(true, "Show Panel", group=gt)
+tblPos = input.string("Top Right", "Position", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group=gt)
+
+pTxt = theme == "Light" ? color.black : color.white
+pBg = theme == "Light" ? color.new(color.gray, 75) : color.new(color.black, 20)
+extV = extMode == "Left" ? extend.left : extMode == "Right" ? extend.right : extend.both
+lblSz = lblSizeStr == "Small" ? size.small : lblSizeStr == "Normal" ? size.normal : lblSizeStr == "Large" ? size.large : size.tiny
+
+hh = ta.highest(high, swingLook)
+ll = ta.lowest(low, swingLook)
+hhBar = ta.highestbars(high, swingLook)
+llBar = ta.lowestbars(low, swingLook)
+isManual = swingMode == "Manual"
+mHi = isManual ? math.max(manualHigh, manualLow) : hh
+mLo = isManual ? math.min(manualHigh, manualLow) : ll
+autoUp = isManual ? true : hhBar > llBar
+up = dirMode == "Up" ? true : dirMode == "Down" ? false : autoUp
+hi0 = up != reverse
+aa = hi0 ? mHi : mLo
+bb = hi0 ? mLo : mHi
+rng = bb - aa
+hasData = not na(aa) and not na(bb) and rng != 0
+lx1 = bar_index - 1
+lx2 = bar_index
+startBar = up ? bar_index + llBar : bar_index + hhBar
+endBar = up ? bar_index + hhBar : bar_index + llBar
+highBar = bar_index + hhBar
+lowBar = bar_index + llBar
+lbX = bar_index + labelOff
+goldT = fillT - 25 < 45 ? 45 : fillT - 25
+showConnEff = showConn and not isManual
+showMarkEff = showMarkers and not isManual
+
+lp0 = hasData ? aa + rng * 0.0 : na
+lp236 = hasData ? aa + rng * 0.236 : na
+lp382 = hasData ? aa + rng * 0.382 : na
+lp5 = hasData ? aa + rng * 0.5 : na
+lp618 = hasData ? aa + rng * 0.618 : na
+lp786 = hasData ? aa + rng * 0.786 : na
+lp1 = hasData ? aa + rng * 1.0 : na
+le1272 = hasData and showExt ? aa + rng * 1.272 : na
+le1414 = hasData and showExt ? aa + rng * 1.414 : na
+le1618 = hasData and showExt ? aa + rng * 1.618 : na
+le200 = hasData and showExt ? aa + rng * 2.0 : na
+le2618 = hasData and showExt ? aa + rng * 2.618 : na
+le3618 = hasData and showExt ? aa + rng * 3.618 : na
+le4236 = hasData and showExt ? aa + rng * 4.236 : na
+le4618 = hasData and showExt ? aa + rng * 4.618 : na
+le4764 = hasData and showExt ? aa + rng * 4.764 : na
+le2272 = hasData and showExt ? aa + rng * 2.272 : na
+le2414 = hasData and showExt ? aa + rng * 2.414 : na
+le300 = hasData and showExt ? aa + rng * 3.0 : na
+le3272 = hasData and showExt ? aa + rng * 3.272 : na
+le3414 = hasData and showExt ? aa + rng * 3.414 : na
+le400 = hasData and showExt ? aa + rng * 4.0 : na
+le4272 = hasData and showExt ? aa + rng * 4.272 : na
+le4414 = hasData and showExt ? aa + rng * 4.414 : na
+um236 = hasData and showUpper ? aa + rng * -0.236 : na
+um382 = hasData and showUpper ? aa + rng * -0.382 : na
+um5 = hasData and showUpper ? aa + rng * -0.5 : na
+um618 = hasData and showUpper ? aa + rng * -0.618 : na
+um1 = hasData and showUpper ? aa + rng * -1.0 : na
+
+var box z1 = box.new(na, na, na, na, border_color=color.new(color.gray, 100))
+var box z2 = box.new(na, na, na, na, border_color=color.new(color.gray, 100))
+var box z3 = box.new(na, na, na, na, border_color=color.new(color.gray, 100))
+var box z4 = box.new(na, na, na, na, border_color=color.new(color.gray, 100))
+var box z5 = box.new(na, na, na, na, border_color=color.new(color.gray, 100))
+var box z6 = box.new(na, na, na, na, border_color=color.new(color.gray, 100))
+
+box.set_extend(z1, extV)
+box.set_top(z1, showFill ? math.max(lp0, lp236) : na)
+box.set_bottom(z1, showFill ? math.min(lp0, lp236) : na)
+box.set_left(z1, lx1)
+box.set_right(z1, lx2)
+box.set_bgcolor(z1, color.new(c236, fillT))
+box.set_extend(z2, extV)
+box.set_top(z2, showFill ? math.max(lp236, lp382) : na)
+box.set_bottom(z2, showFill ? math.min(lp236, lp382) : na)
+box.set_left(z2, lx1)
+box.set_right(z2, lx2)
+box.set_bgcolor(z2, color.new(c382, fillT))
+box.set_extend(z3, extV)
+box.set_top(z3, showFill ? math.max(lp382, lp5) : na)
+box.set_bottom(z3, showFill ? math.min(lp382, lp5) : na)
+box.set_left(z3, lx1)
+box.set_right(z3, lx2)
+box.set_bgcolor(z3, color.new(c5, fillT))
+box.set_extend(z4, extV)
+box.set_top(z4, showFill ? math.max(lp5, lp618) : na)
+box.set_bottom(z4, showFill ? math.min(lp5, lp618) : na)
+box.set_left(z4, lx1)
+box.set_right(z4, lx2)
+box.set_bgcolor(z4, color.new(c618, fillT))
+box.set_extend(z5, extV)
+box.set_top(z5, showFill ? math.max(lp618, lp786) : na)
+box.set_bottom(z5, showFill ? math.min(lp618, lp786) : na)
+box.set_left(z5, lx1)
+box.set_right(z5, lx2)
+box.set_bgcolor(z5, color.new(goldCol, goldT))
+box.set_extend(z6, extV)
+box.set_top(z6, showFill ? math.max(lp786, lp1) : na)
+box.set_bottom(z6, showFill ? math.min(lp786, lp1) : na)
+box.set_left(z6, lx1)
+box.set_right(z6, lx2)
+box.set_bgcolor(z6, color.new(c1, fillT))
+
+var line l0 = line.new(na, na, na, na, color=c0, width=lineW)
+var line l236 = line.new(na, na, na, na, color=c236, width=lineW)
+var line l382 = line.new(na, na, na, na, color=c382, width=lineW)
+var line l5 = line.new(na, na, na, na, color=c5, width=lineW)
+var line l618 = line.new(na, na, na, na, color=c618, width=lineW + 1)
+var line l786 = line.new(na, na, na, na, color=c786, width=lineW)
+var line l1 = line.new(na, na, na, na, color=c1, width=lineW)
+var line le1 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line le2 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line le3 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line le4 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line le5 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line le6 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line le7 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line le8 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line le9 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line le10 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line le11 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line le12 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line le13 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line le14 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line le15 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line le16 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line le17 = line.new(na, na, na, na, color=ceCol, width=lineW, style=line.style_dashed)
+var line lu1 = line.new(na, na, na, na, color=upCol, width=lineW, style=line.style_dashed)
+var line lu2 = line.new(na, na, na, na, color=upCol, width=lineW, style=line.style_dashed)
+var line lu3 = line.new(na, na, na, na, color=upCol, width=lineW, style=line.style_dashed)
+var line lu4 = line.new(na, na, na, na, color=upCol, width=lineW, style=line.style_dashed)
+var line lu5 = line.new(na, na, na, na, color=upCol, width=lineW, style=line.style_dashed)
+
+line.set_extend(l0, extV)
+line.set_xy1(l0, lx1, lp0)
+line.set_xy2(l0, lx2, lp0)
+line.set_extend(l236, extV)
+line.set_xy1(l236, lx1, lp236)
+line.set_xy2(l236, lx2, lp236)
+line.set_extend(l382, extV)
+line.set_xy1(l382, lx1, lp382)
+line.set_xy2(l382, lx2, lp382)
+line.set_extend(l5, extV)
+line.set_xy1(l5, lx1, lp5)
+line.set_xy2(l5, lx2, lp5)
+line.set_extend(l618, extV)
+line.set_xy1(l618, lx1, lp618)
+line.set_xy2(l618, lx2, lp618)
+line.set_extend(l786, extV)
+line.set_xy1(l786, lx1, lp786)
+line.set_xy2(l786, lx2, lp786)
+line.set_extend(l1, extV)
+line.set_xy1(l1, lx1, lp1)
+line.set_xy2(l1, lx2, lp1)
+line.set_extend(le1, extV)
+line.set_xy1(le1, lx1, le1272)
+line.set_xy2(le1, lx2, le1272)
+line.set_extend(le2, extV)
+line.set_xy1(le2, lx1, le1414)
+line.set_xy2(le2, lx2, le1414)
+line.set_extend(le3, extV)
+line.set_xy1(le3, lx1, le1618)
+line.set_xy2(le3, lx2, le1618)
+line.set_extend(le4, extV)
+line.set_xy1(le4, lx1, le200)
+line.set_xy2(le4, lx2, le200)
+line.set_extend(le5, extV)
+line.set_xy1(le5, lx1, le2618)
+line.set_xy2(le5, lx2, le2618)
+line.set_extend(le6, extV)
+line.set_xy1(le6, lx1, le3618)
+line.set_xy2(le6, lx2, le3618)
+line.set_extend(le7, extV)
+line.set_xy1(le7, lx1, le4236)
+line.set_xy2(le7, lx2, le4236)
+line.set_extend(le8, extV)
+line.set_xy1(le8, lx1, le4618)
+line.set_xy2(le8, lx2, le4618)
+line.set_extend(le9, extV)
+line.set_xy1(le9, lx1, le4764)
+line.set_xy2(le9, lx2, le4764)
+line.set_extend(le10, extV)
+line.set_xy1(le10, lx1, le2272)
+line.set_xy2(le10, lx2, le2272)
+line.set_extend(le11, extV)
+line.set_xy1(le11, lx1, le2414)
+line.set_xy2(le11, lx2, le2414)
+line.set_extend(le12, extV)
+line.set_xy1(le12, lx1, le300)
+line.set_xy2(le12, lx2, le300)
+line.set_extend(le13, extV)
+line.set_xy1(le13, lx1, le3272)
+line.set_xy2(le13, lx2, le3272)
+line.set_extend(le14, extV)
+line.set_xy1(le14, lx1, le3414)
+line.set_xy2(le14, lx2, le3414)
+line.set_extend(le15, extV)
+line.set_xy1(le15, lx1, le400)
+line.set_xy2(le15, lx2, le400)
+line.set_extend(le16, extV)
+line.set_xy1(le16, lx1, le4272)
+line.set_xy2(le16, lx2, le4272)
+line.set_extend(le17, extV)
+line.set_xy1(le17, lx1, le4414)
+line.set_xy2(le17, lx2, le4414)
+line.set_extend(lu1, extV)
+line.set_xy1(lu1, lx1, um236)
+line.set_xy2(lu1, lx2, um236)
+line.set_extend(lu2, extV)
+line.set_xy1(lu2, lx1, um382)
+line.set_xy2(lu2, lx2, um382)
+line.set_extend(lu3, extV)
+line.set_xy1(lu3, lx1, um5)
+line.set_xy2(lu3, lx2, um5)
+line.set_extend(lu4, extV)
+line.set_xy1(lu4, lx1, um618)
+line.set_xy2(lu4, lx2, um618)
+line.set_extend(lu5, extV)
+line.set_xy1(lu5, lx1, um1)
+line.set_xy2(lu5, lx2, um1)
+
+var line conn = line.new(na, na, na, na, color=color.new(color.gray, 10), width=1, style=line.style_dashed)
+line.set_xy1(conn, showConnEff ? startBar : na, showConnEff ? bb : na)
+line.set_xy2(conn, showConnEff ? endBar : na, showConnEff ? aa : na)
+
+htfHi = request.security(syminfo.tickerid, mtfTf, ta.highest(high, swingLook), lookahead=barmerge.lookahead_off)
+htfLo = request.security(syminfo.tickerid, mtfTf, ta.lowest(low, swingLook), lookahead=barmerge.lookahead_off)
+htf618 = showMtf and not na(htfHi) ? htfHi - (htfHi - htfLo) * 0.618 : na
+htf5 = showMtf and not na(htfHi) ? htfHi - (htfHi - htfLo) * 0.5 : na
+var line m618 = line.new(na, na, na, na, extend=extend.both, color=htfCol, width=1, style=line.style_dashed)
+var line m5 = line.new(na, na, na, na, extend=extend.both, color=htfCol, width=1, style=line.style_dotted)
+line.set_xy1(m618, lx1, htf618)
+line.set_xy2(m618, lx2, htf618)
+line.set_xy1(m5, lx1, htf5)
+line.set_xy2(m5, lx2, htf5)
+
+var label b0 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=c0, size=lblSz)
+var label b236 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=c236, size=lblSz)
+var label b382 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=c382, size=lblSz)
+var label b5 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=c5, size=lblSz)
+var label b618 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=c618, size=lblSz)
+var label b786 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=c786, size=lblSz)
+var label b1 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=c1, size=lblSz)
+var label be1 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=lblSz)
+var label be2 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=lblSz)
+var label be3 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=lblSz)
+var label be4 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=lblSz)
+var label be5 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=lblSz)
+var label be6 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=lblSz)
+var label be7 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=lblSz)
+var label be8 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=lblSz)
+var label be9 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=lblSz)
+var label be10 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=lblSz)
+var label be11 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=lblSz)
+var label be12 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=lblSz)
+var label be13 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=lblSz)
+var label be14 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=lblSz)
+var label be15 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=lblSz)
+var label be16 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=lblSz)
+var label be17 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=ceCol, size=lblSz)
+var label bu1 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=upCol, size=lblSz)
+var label bu2 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=upCol, size=lblSz)
+var label bu3 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=upCol, size=lblSz)
+var label bu4 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=upCol, size=lblSz)
+var label bu5 = label.new(na, na, "", style=label.style_label_left, color=pBg, textcolor=upCol, size=lblSz)
+
+label.set_xy(b0, lbX, lp0)
+label.set_text(b0, showLbl and not na(lp0) ? "0.0  " + str.tostring(lp0, format.mintick) : "")
+label.set_xy(b236, lbX, lp236)
+label.set_text(b236, showLbl and not na(lp236) ? "0.236  " + str.tostring(lp236, format.mintick) : "")
+label.set_xy(b382, lbX, lp382)
+label.set_text(b382, showLbl and not na(lp382) ? "0.382  " + str.tostring(lp382, format.mintick) : "")
+label.set_xy(b5, lbX, lp5)
+label.set_text(b5, showLbl and not na(lp5) ? "0.5  " + str.tostring(lp5, format.mintick) : "")
+label.set_xy(b618, lbX, lp618)
+label.set_text(b618, showLbl and not na(lp618) ? "0.618  " + str.tostring(lp618, format.mintick) : "")
+label.set_xy(b786, lbX, lp786)
+label.set_text(b786, showLbl and not na(lp786) ? "0.786  " + str.tostring(lp786, format.mintick) : "")
+label.set_xy(b1, lbX, lp1)
+label.set_text(b1, showLbl and not na(lp1) ? "1.0  " + str.tostring(lp1, format.mintick) : "")
+label.set_xy(be1, lbX, le1272)
+label.set_text(be1, showLbl and not na(le1272) ? "1.272  " + str.tostring(le1272, format.mintick) : "")
+label.set_xy(be2, lbX, le1414)
+label.set_text(be2, showLbl and not na(le1414) ? "1.414  " + str.tostring(le1414, format.mintick) : "")
+label.set_xy(be3, lbX, le1618)
+label.set_text(be3, showLbl and not na(le1618) ? "1.618  " + str.tostring(le1618, format.mintick) : "")
+label.set_xy(be4, lbX, le200)
+label.set_text(be4, showLbl and not na(le200) ? "2.0  " + str.tostring(le200, format.mintick) : "")
+label.set_xy(be5, lbX, le2618)
+label.set_text(be5, showLbl and not na(le2618) ? "2.618  " + str.tostring(le2618, format.mintick) : "")
+label.set_xy(be6, lbX, le3618)
+label.set_text(be6, showLbl and not na(le3618) ? "3.618  " + str.tostring(le3618, format.mintick) : "")
+label.set_xy(be7, lbX, le4236)
+label.set_text(be7, showLbl and not na(le4236) ? "4.236  " + str.tostring(le4236, format.mintick) : "")
+label.set_xy(be8, lbX, le4618)
+label.set_text(be8, showLbl and not na(le4618) ? "4.618  " + str.tostring(le4618, format.mintick) : "")
+label.set_xy(be9, lbX, le4764)
+label.set_text(be9, showLbl and not na(le4764) ? "4.764  " + str.tostring(le4764, format.mintick) : "")
+label.set_xy(be10, lbX, le2272)
+label.set_text(be10, showLbl and not na(le2272) ? "2.272  " + str.tostring(le2272, format.mintick) : "")
+label.set_xy(be11, lbX, le2414)
+label.set_text(be11, showLbl and not na(le2414) ? "2.414  " + str.tostring(le2414, format.mintick) : "")
+label.set_xy(be12, lbX, le300)
+label.set_text(be12, showLbl and not na(le300) ? "3.0  " + str.tostring(le300, format.mintick) : "")
+label.set_xy(be13, lbX, le3272)
+label.set_text(be13, showLbl and not na(le3272) ? "3.272  " + str.tostring(le3272, format.mintick) : "")
+label.set_xy(be14, lbX, le3414)
+label.set_text(be14, showLbl and not na(le3414) ? "3.414  " + str.tostring(le3414, format.mintick) : "")
+label.set_xy(be15, lbX, le400)
+label.set_text(be15, showLbl and not na(le400) ? "4.0  " + str.tostring(le400, format.mintick) : "")
+label.set_xy(be16, lbX, le4272)
+label.set_text(be16, showLbl and not na(le4272) ? "4.272  " + str.tostring(le4272, format.mintick) : "")
+label.set_xy(be17, lbX, le4414)
+label.set_text(be17, showLbl and not na(le4414) ? "4.414  " + str.tostring(le4414, format.mintick) : "")
+label.set_xy(bu1, lbX, um236)
+label.set_text(bu1, showLbl and showUpperLbl and not na(um236) ? "-0.236  " + str.tostring(um236, format.mintick) : "")
+label.set_xy(bu2, lbX, um382)
+label.set_text(bu2, showLbl and showUpperLbl and not na(um382) ? "-0.382  " + str.tostring(um382, format.mintick) : "")
+label.set_xy(bu3, lbX, um5)
+label.set_text(bu3, showLbl and showUpperLbl and not na(um5) ? "-0.5  " + str.tostring(um5, format.mintick) : "")
+label.set_xy(bu4, lbX, um618)
+label.set_text(bu4, showLbl and showUpperLbl and not na(um618) ? "-0.618  " + str.tostring(um618, format.mintick) : "")
+label.set_xy(bu5, lbX, um1)
+label.set_text(bu5, showLbl and showUpperLbl and not na(um1) ? "-1.0  " + str.tostring(um1, format.mintick) : "")
+
+var label mkH = label.new(na, na, "", style=label.style_label_down, color=color.new(#f23645, 20), textcolor=color.white, size=lblSz)
+var label mkL = label.new(na, na, "", style=label.style_label_up, color=color.new(#4caf50, 20), textcolor=color.white, size=lblSz)
+label.set_xy(mkH, highBar, showMarkEff ? hh : na)
+label.set_text(mkH, showMarkEff and not na(hh) ? "H" : "")
+label.set_xy(mkL, lowBar, showMarkEff ? ll : na)
+label.set_text(mkL, showMarkEff and not na(ll) ? "L" : "")
+
+posPct = hasData ? (close - aa) / rng * 100 : na
+rr = hasData and (lp618 - lp1) != 0 ? math.abs(lp0 - lp618) / math.abs(lp618 - lp1) : na
+zoneTxt = not hasData ? "-" : posPct < 0 ? "Above 0%" : posPct < 23.6 ? "0 - 0.236" : posPct < 38.2 ? "0.236 - 0.382" : posPct < 50 ? "0.382 - 0.5" : posPct < 61.8 ? "0.5 - 0.618" : posPct < 78.6 ? "GOLDEN ZONE" : posPct <= 100 ? "0.786 - 1.0" : "Below 100%"
+dirTxt = not hasData ? "-" : up ? "UP" : "DOWN"
+dirBg = not hasData ? color.gray : up ? color.new(color.green, 55) : color.new(color.red, 55)
+tblP = tblPos == "Top Left" ? position.top_left : tblPos == "Bottom Right" ? position.bottom_right : tblPos == "Bottom Left" ? position.bottom_left : position.top_right
+var table dash = table.new(tblP, 2, 6, border_width=1, frame_color=color.new(color.gray, 40), frame_width=1)
+table.cell(dash, 0, 0, "Turhal Fib", text_color=pTxt, bgcolor=pBg, text_size=lblSz)
+table.cell(dash, 1, 0, showTable ? dirTxt : "", text_color=color.white, bgcolor=dirBg, text_size=lblSz)
+table.cell(dash, 0, 1, showTable ? "0%" : "", text_color=pTxt, bgcolor=pBg, text_size=size.tiny)
+table.cell(dash, 1, 1, showTable and not na(aa) ? str.tostring(aa, format.mintick) : "", text_color=pTxt, bgcolor=pBg, text_size=size.tiny)
+table.cell(dash, 0, 2, showTable ? "100%" : "", text_color=pTxt, bgcolor=pBg, text_size=size.tiny)
+table.cell(dash, 1, 2, showTable and not na(bb) ? str.tostring(bb, format.mintick) : "", text_color=pTxt, bgcolor=pBg, text_size=size.tiny)
+table.cell(dash, 0, 3, showTable ? "Retr %" : "", text_color=pTxt, bgcolor=pBg, text_size=size.tiny)
+table.cell(dash, 1, 3, showTable and not na(posPct) ? str.tostring(posPct, "0.0") + " %" : "", text_color=pTxt, bgcolor=pBg, text_size=size.tiny)
+table.cell(dash, 0, 4, showTable ? "Zone" : "", text_color=pTxt, bgcolor=pBg, text_size=size.tiny)
+table.cell(dash, 1, 4, showTable ? zoneTxt : "", text_color=pTxt, bgcolor=zoneTxt == "GOLDEN ZONE" ? color.new(goldCol, 40) : pBg, text_size=size.tiny)
+table.cell(dash, 0, 5, showTable ? "R/R 0.618" : "", text_color=pTxt, bgcolor=pBg, text_size=size.tiny)
+table.cell(dash, 1, 5, showTable and not na(rr) ? "1 : " + str.tostring(rr, "0.00") : "", text_color=pTxt, bgcolor=not na(rr) and rr >= 2 ? color.new(color.green, 50) : pBg, text_size=size.tiny)
+
+gLo = math.min(lp618, lp786)
+gHi = math.max(lp618, lp786)
+inGold = hasData and close <= gHi and close >= gLo
+goldEntry = inGold and not inGold[1]
+touch618 = hasData and low <= lp618 and high >= lp618
+broke100 = hasData and (ta.crossover(close, bb) or ta.crossunder(close, bb))
+bgcolor(hlBg and inGold ? color.new(goldCol, 90) : na)
+alertcondition(goldEntry, "Golden Zone Entry", "Turhal Fib: price entered the Golden Zone")
+alertcondition(touch618, "Touch 0.618", "Turhal Fib: price touched the 0.618 level")
+alertcondition(broke100, "Broke 100% Level", "Turhal Fib: price broke the 100% level")

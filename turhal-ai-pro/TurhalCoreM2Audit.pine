@@ -1,0 +1,411 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+// © berkayturhal38
+//@version=6
+// ============================================================================
+//  TURHAL CORE M2 AUDIT  —  v1  (RefCore M2 S/R bölgelerinin objektif denetimi)
+//  AMAÇ: RefCore M2'nin ürettiği S/R seviyelerinin gerçekten çalışıp
+//  çalışmadığını episode FSM ile ölçmek. RefCore dosyasına DOKUNMAZ.
+//  KRİTİK: Havuz/bölge üretim matematiği RefCore M2 ile BİREBİR AYNIDIR
+//  (aynı pivot kaynağı, 0.3xATR giriş merge, 0.5xATR temas + 3 bar gap,
+//  0.5xATR crossing ihlali, skor = temas - ihlal, kapasite 20).
+//  Audit yalnızca PARALEL defter tutar; havuz davranışını DEĞİŞTİRMEZ.
+//  EPISODE FSM (seviye başına):
+//   BEKLIYOR -> GEÇERLİ (temas>=2 ve skor>0 ilk kez) -> ARM bekle (fiyat
+//   seviyeden >= 1xATR uzaklaşmalı) -> ARMED -> TEMAS -> SONUÇ:
+//     TEPKİ   = itilme yönünde MFE >= 1xATR(temas anı), kırılmadan önce
+//     ZAYIF   = 10 kapanmış barda MFE < 1xATR, kırılma yok
+//     KIRILDI = close bölgeyi karşı yönde 0.5xATR marjla geçti -> seviye ÖLÜR
+//   TEPKİ/ZAYIF sonrası yeniden ARM şartı (touch-spam engeli).
+//  ÖLÇÜLENLER: ilk temas tepki oranı (K1) · TEPKİ/ZAYIF/KIRILDI · çalışma
+//  oranı · ort. tepki (xATR) · yaşam süresi · kırılım öncesi başarılı test ·
+//  rank (R1/R2/R3) analizi (K2) · yakın bölge bağımlılık oranı (K4).
+//  Yalnızca kapanmış barlar; non-repaint. Sinyal/strateji YOK.
+//  License: MPL-2.0
+// ============================================================================
+indicator("Turhal Core M2 Audit", "M2 Audit", overlay = true, max_labels_count = 60)
+
+// ============================================================================
+//  GİRDİLER  (M2 grubu RefCore ile AYNI varsayılanlar — değiştirme!)
+// ============================================================================
+gS2 = "M2 Havuz (RefCore ile birebir)"
+atrLen    = input.int(14, "ATR Periyodu", minval = 1, group = gS2)
+srLen     = input.int(10, "S/R Pivot Uzunluğu", minval = 3, maxval = 30, group = gS2)
+srMergeK  = input.float(0.3, "Havuza Giriş Merge (xATR)", minval = 0.05, step = 0.05, group = gS2)
+srTzK     = input.float(0.5, "Temas Bölgesi (xATR)", minval = 0.1, step = 0.1, group = gS2)
+srGap     = input.int(3, "Temaslar Arası Min Bar", minval = 1, maxval = 20, group = gS2)
+srViolK   = input.float(0.5, "İhlal Marjı (xATR)", minval = 0.1, step = 0.1, group = gS2)
+srPoolMax = input.int(20, "Havuz Kapasitesi", minval = 5, maxval = 40, group = gS2)
+
+gA = "Audit FSM"
+armK     = input.float(1.0, "Arm Mesafesi (xATR)", minval = 0.2, step = 0.1, group = gA)
+reactK   = input.float(1.0, "Tepki Eşiği (xATR MFE)", minval = 0.2, step = 0.1, group = gA)
+maxTrk   = input.int(10, "Tepki İzleme Penceresi (bar)", minval = 2, maxval = 30, group = gA)
+depDistK = input.float(1.0, "Bağımlılık Mesafesi (xATR)", minval = 0.2, step = 0.1, group = gA)
+depBars  = input.int(5, "Bağımlı Temas Penceresi (bar)", minval = 1, maxval = 20, group = gA)
+showPanel = input.bool(true, "İstatistik Paneli", group = gA)
+showMarks = input.bool(true, "Sonuç İşaretleri (✓/✗/·)", group = gA)
+
+gT = "Trader Özeti"
+advMode    = input.bool(false, "Gelişmiş Mod (ham istatistikler)", group = gT)
+showBadges = input.bool(true,  "Bölge Rozetleri (yıldız)", group = gT)
+
+// ============================================================================
+//  M2 HAVUZ  —  RefCore M2 kopyası (matematik birebir; yalnızca FSM defterleri
+//  paralel dizi olarak eklendi — havuz davranışına etkisi SIFIR)
+// ============================================================================
+atr = ta.atr(atrLen)
+srPh = ta.pivothigh(srLen, srLen)
+srPl = ta.pivotlow(srLen, srLen)
+
+var float[] srLv  = array.new_float()
+var int[]   srTch = array.new_int()
+var int[]   srVio = array.new_int()
+var int[]   srLtb = array.new_int()
+// ---- Audit FSM defterleri (havuzla paralel; havuz matematiğine KATILMAZ) ----
+var int[]   epSt       = array.new_int()      // 0=BEKLIYOR 1=ARM-BEKLE 2=ARMED 3=TEMAS-İZLEME 4=ÖLÜ
+var int[]   epValidBar = array.new_int()
+var float[] epTouchATR = array.new_float()
+var float[] epMFE      = array.new_float()
+var int[]   epTrkN     = array.new_int()
+var int[]   epAppr     = array.new_int()
+var bool[]  epFirstDone = array.new_bool()
+var int[]   epTepkiCnt = array.new_int()
+var int[]   epLastTch  = array.new_int()
+var int[]   epRank     = array.new_int()
+var bool[]  epFirstOK  = array.new_bool()     // rozet defteri: ilk temas TEPKİ miydi
+var float[] epReactSum = array.new_float()    // rozet defteri: TEPKİ MFE/ATR toplamı
+
+f_srAdd(float lv) =>
+    if not na(atr) and atr > 0
+        bool exists = false
+        if array.size(srLv) > 0
+            for i = 0 to array.size(srLv) - 1
+                if math.abs(array.get(srLv, i) - lv) < srMergeK * atr
+                    exists := true
+                    break
+        if not exists
+            array.push(srLv, lv)
+            array.push(srTch, 1)
+            array.push(srVio, 0)
+            array.push(srLtb, bar_index)
+            // FSM defterleri (paralel)
+            array.push(epSt, 0)
+            array.push(epValidBar, 0)
+            array.push(epTouchATR, na)
+            array.push(epMFE, 0.0)
+            array.push(epTrkN, 0)
+            array.push(epAppr, 0)
+            array.push(epFirstDone, false)
+            array.push(epTepkiCnt, 0)
+            array.push(epLastTch, 0)
+            array.push(epRank, 0)
+            array.push(epFirstOK, false)
+            array.push(epReactSum, 0.0)
+            if array.size(srLv) > srPoolMax
+                array.shift(srLv)
+                array.shift(srTch)
+                array.shift(srVio)
+                array.shift(srLtb)
+                array.shift(epSt)
+                array.shift(epValidBar)
+                array.shift(epTouchATR)
+                array.shift(epMFE)
+                array.shift(epTrkN)
+                array.shift(epAppr)
+                array.shift(epFirstDone)
+                array.shift(epTepkiCnt)
+                array.shift(epLastTch)
+                array.shift(epRank)
+                array.shift(epFirstOK)
+                array.shift(epReactSum)
+
+// Rank: temas anında, aynı taraftaki geçerli seviyeler arasında skor sırası
+f_rank(int idx) =>
+    lvI = array.get(srLv, idx)
+    scI = array.get(srTch, idx) - array.get(srVio, idx)
+    isSup = lvI < close
+    int cnt = 0
+    for j = 0 to array.size(srLv) - 1
+        if j != idx
+            scJ = array.get(srTch, j) - array.get(srVio, j)
+            if array.get(srTch, j) >= 2 and scJ > 0
+                lvJ = array.get(srLv, j)
+                if (lvJ < close) == isSup and scJ > scI
+                    cnt += 1
+    cnt + 1
+
+// ============================================================================
+//  GLOBAL SAYAÇLAR
+// ============================================================================
+var int   cntValid = 0     // geçerli hale gelen seviye (episode) sayısı
+var int   cntDead  = 0
+var int   firstN   = 0     // ilk temas sonuçlanan episode
+var int   firstWin = 0     // ilk temas = TEPKİ
+var int   tepkiN   = 0
+var int   zayifN   = 0
+var int   kirN     = 0
+var float reactSum = 0.0   // TEPKİ'lerin MFE/ATR toplamı
+var int   lifeSum  = 0
+var int   testsSum = 0     // kırılım öncesi başarılı test toplamı
+var int   nearN    = 0     // yakın (<depDistK xATR) bölge temas olayı
+var int   depN     = 0     // bunlardan bağımlı (<= depBars bar) olanlar
+var int[] rnkT = array.new_int(4, 0)   // rank 1/2/3/4+ temas sonuçları
+var int[] rnkW = array.new_int(4, 0)   // rank 1/2/3/4+ TEPKİ sayısı
+
+// Sonuç işaretleri havuzu
+var label[] mkPool = array.new_label()
+f_mark(string s, float y, color c) =>
+    if showMarks
+        array.push(mkPool, label.new(bar_index, y, s, color = color.new(c, 40), textcolor = color.white, size = size.tiny, style = label.style_label_left))
+        if array.size(mkPool) > 40
+            label.delete(array.shift(mkPool))
+
+// ============================================================================
+//  MOTOR  (yalnızca kapanmış bar: havuz güncelle + FSM işlet)
+// ============================================================================
+if barstate.isconfirmed
+    // ---- Havuz güncelleme (RefCore M2 ile birebir) ----
+    if not na(srPl)
+        f_srAdd(srPl)
+    if not na(srPh)
+        f_srAdd(srPh)
+    if not na(atr) and atr > 0 and array.size(srLv) > 0
+        tzS = srTzK * atr
+        vzS = srViolK * atr
+        for i = 0 to array.size(srLv) - 1
+            lv = array.get(srLv, i)
+            if low <= lv + tzS and high >= lv - tzS
+                if bar_index - array.get(srLtb, i) >= srGap
+                    array.set(srTch, i, array.get(srTch, i) + 1)
+                    array.set(srLtb, i, bar_index)
+            if (close > lv + vzS and close[1] <= lv + vzS) or (close < lv - vzS and close[1] >= lv - vzS)
+                array.set(srVio, i, array.get(srVio, i) + 1)
+
+        // ---- EPISODE FSM (havuzdan sonra; seviye başına) ----
+        for i = 0 to array.size(srLv) - 1
+            lv = array.get(srLv, i)
+            scNow = array.get(srTch, i) - array.get(srVio, i)
+            // BEKLIYOR -> GEÇERLİ
+            if array.get(epSt, i) == 0 and array.get(srTch, i) >= 2 and scNow > 0
+                array.set(epSt, i, 1)
+                array.set(epValidBar, i, bar_index)
+                cntValid += 1
+            st = array.get(epSt, i)
+            if st == 1                                   // ARM bekle: fiyat uzaklaşmalı
+                if math.abs(close - lv) >= armK * atr
+                    array.set(epSt, i, 2)
+            else if st == 2                              // ARMED: temas bekleniyor
+                if low <= lv + tzS and high >= lv - tzS
+                    appr = close[1] > lv ? 1 : -1        // önceki bar tarafı = yaklaşım yönü
+                    array.set(epAppr, i, appr)
+                    array.set(epTouchATR, i, atr)
+                    array.set(epMFE, i, appr == 1 ? high - lv : lv - low)
+                    array.set(epTrkN, i, 1)
+                    array.set(epRank, i, f_rank(i))
+                    // Bağımlılık ölçümü: yakın geçerli seviyelerin son temas zamanı
+                    for j = 0 to array.size(srLv) - 1
+                        if j != i and array.get(epSt, j) >= 1 and array.get(epSt, j) <= 3
+                            if math.abs(array.get(srLv, j) - lv) < depDistK * atr
+                                nearN += 1
+                                if array.get(epLastTch, j) > 0 and bar_index - array.get(epLastTch, j) <= depBars
+                                    depN += 1
+                    array.set(epLastTch, i, bar_index)
+                    array.set(epSt, i, 3)
+            else if st == 3                              // TEMAS izleme
+                appr = array.get(epAppr, i)
+                mfe = math.max(array.get(epMFE, i), appr == 1 ? high - lv : lv - low)
+                array.set(epMFE, i, mfe)
+                tA = array.get(epTouchATR, i)
+                rIdx = math.min(array.get(epRank, i), 4) - 1
+                kir = appr == 1 ? close < lv - vzS : close > lv + vzS
+                if kir                                   // KIRILDI -> seviye ölür
+                    kirN += 1
+                    array.set(rnkT, rIdx, array.get(rnkT, rIdx) + 1)
+                    if not array.get(epFirstDone, i)
+                        array.set(epFirstDone, i, true)
+                        firstN += 1
+                    cntDead += 1
+                    lifeSum += bar_index - array.get(epValidBar, i)
+                    testsSum += array.get(epTepkiCnt, i)
+                    array.set(epSt, i, 4)
+                    f_mark("✗", lv, color.red)
+                else if not na(tA) and tA > 0 and mfe >= reactK * tA   // TEPKİ
+                    tepkiN += 1
+                    reactSum += mfe / tA
+                    array.set(epTepkiCnt, i, array.get(epTepkiCnt, i) + 1)
+                    array.set(epReactSum, i, array.get(epReactSum, i) + mfe / tA)
+                    array.set(rnkT, rIdx, array.get(rnkT, rIdx) + 1)
+                    array.set(rnkW, rIdx, array.get(rnkW, rIdx) + 1)
+                    if not array.get(epFirstDone, i)
+                        array.set(epFirstDone, i, true)
+                        array.set(epFirstOK, i, true)
+                        firstN += 1
+                        firstWin += 1
+                    array.set(epSt, i, 1)
+                    f_mark("✓", lv, color.green)
+                else if array.get(epTrkN, i) >= maxTrk   // ZAYIF
+                    zayifN += 1
+                    array.set(rnkT, rIdx, array.get(rnkT, rIdx) + 1)
+                    if not array.get(epFirstDone, i)
+                        array.set(epFirstDone, i, true)
+                        firstN += 1
+                    array.set(epSt, i, 1)
+                    f_mark("·", lv, color.gray)
+                else
+                    array.set(epTrkN, i, array.get(epTrkN, i) + 1)
+
+// ============================================================================
+//  TRADER ÖZET KATMANI  (audit hesaplarına DOKUNMAZ; yalnızca sayaçları okur)
+//  Güven Puanı (0-100) = %40 K1 (ilk temas tepki) + %30 çalışma oranı
+//                      + %20 K3 sağlamlık (yaşam/30 ve test/2 normalize)
+//                      + %10 K2 rank monotonluğu (100/60/20)
+//  Yıldız: >=80 ★★★★★, >=65 ★★★★, >=50 ★★★, >=35 ★★, altı ★
+//  Sınıf : >=65 GÜÇLÜ, >=45 ORTA, altı ZAYIF
+// ============================================================================
+f_pct(int a, int b) => b > 0 ? "%" + str.tostring(math.round(a * 100.0 / b)) + " (" + str.tostring(a) + "/" + str.tostring(b) + ")" : "-"
+f_rankRow(int idx) =>
+    t = array.get(rnkT, idx)
+    w = array.get(rnkW, idx)
+    t > 0 ? "%" + str.tostring(math.round(w * 100.0 / t)) + " (" + str.tostring(w) + "/" + str.tostring(t) + ")" : "-"
+f_rankPct(int idx) =>
+    t = array.get(rnkT, idx)
+    t > 0 ? array.get(rnkW, idx) * 100.0 / t : na
+f_stars(int n) => n >= 5 ? "★★★★★" : n == 4 ? "★★★★" : n == 3 ? "★★★" : n == 2 ? "★★" : "★"
+f_qStars(int q) => q >= 80 ? 5 : q >= 65 ? 4 : q >= 50 ? 3 : q >= 35 ? 2 : 1
+tc(table tb, int c, int r, string s, color bg) => table.cell(tb, c, r, s, text_color = color.white, bgcolor = bg, text_size = size.small)
+
+// Seviye kalitesi 0-100 (rozet): %30 ilk temas sonucu (✓=1, ✗=0, henüz yok=0.5)
+// + %30 tepki yoğunluğu (tepki/3 cap) + %20 temizlik (1 - ihlal/temas)
+// + %20 ort. tepki büyüklüğü (ortMFE/1.5 ATR cap)
+f_lvlQ(int i) =>
+    tCnt = array.get(epTepkiCnt, i)
+    aR   = tCnt > 0 ? array.get(epReactSum, i) / tCnt : 0.0
+    a = array.get(epFirstOK, i) ? 1.0 : array.get(epFirstDone, i) ? 0.0 : 0.5
+    b = math.min(tCnt / 3.0, 1.0)
+    c = 1.0 - math.min(array.get(srVio, i) * 1.0 / math.max(array.get(srTch, i), 1), 1.0)
+    d = math.min(aR / 1.5, 1.0)
+    int(math.round(100 * (0.30 * a + 0.30 * b + 0.20 * c + 0.20 * d)))
+
+// ---- Güven Puanı bileşenleri ----
+calisma = tepkiN + kirN
+float k1Pct  = firstN > 0 ? firstWin * 100.0 / firstN : na
+float calPct = calisma > 0 ? tepkiN * 100.0 / calisma : na
+float yasam  = cntDead > 0 ? lifeSum * 1.0 / cntDead : na
+float testO  = cntDead > 0 ? testsSum * 1.0 / cntDead : na
+float sagPct = (na(yasam) ? 50.0 : math.min(yasam / 30.0, 1.0) * 50.0) + (na(testO) ? 25.0 : math.min(testO / 2.0, 1.0) * 50.0)
+float rk1 = f_rankPct(0)
+float rk2 = f_rankPct(1)
+float rk3 = f_rankPct(2)
+float monoPct = na(rk1) or na(rk2) or na(rk3) ? 60.0 : rk1 >= rk2 and rk2 >= rk3 ? 100.0 : rk1 >= rk3 ? 60.0 : 20.0
+bool  hazir = not na(k1Pct) and not na(calPct)
+int   guven = hazir ? int(math.round(0.4 * k1Pct + 0.3 * calPct + 0.2 * sagPct + 0.1 * monoPct)) : 0
+int   yildizN = guven >= 80 ? 5 : guven >= 65 ? 4 : guven >= 50 ? 3 : guven >= 35 ? 2 : 1
+string sinif  = guven >= 65 ? "GÜÇLÜ" : guven >= 45 ? "ORTA" : "ZAYIF"
+color  sinifC = guven >= 65 ? color.new(color.green, 25) : guven >= 45 ? color.new(color.orange, 30) : color.new(color.red, 35)
+string yorum  = not hazir ? "Veri toplanıyor — puana henüz güvenme" : guven >= 65 ? "Bölgeler güvenilir; S1/R1 öncelikli izlenebilir" : guven >= 45 ? "Bölgeler kısmen çalışıyor; tek başına karar verme" : "Bölgelere güvenme; sembol/TF veya parametre gözden geçir"
+okSample = cntValid >= 30
+okBars   = bar_index >= 600
+
+// ---- Bölge rozetleri: çok-metrikli seviye kalitesi (f_lvlQ) + Güven bağlantılı renk ----
+//  Renk: sistem Güven Puanı ZAYIF ise (guven < 45 veya veri yok) TÜM rozetler gri
+//  (güvenilmez sistemde yeşil rozet yanıltmasın). Aksi halde: kalite >= 65 ->
+//  koyu yeşil (destek) / koyu kırmızı (direnç); 45-64 -> turuncu; < 45 -> gri.
+//  Ayrıntılı metrikler rozetin TOOLTIP'inde (üzerine gelince); Gelişmiş Mod'da
+//  rozet metnine kalite puanı da eklenir.
+var label[] bdgPool = array.new_label()
+if barstate.islast
+    for lb in bdgPool
+        label.delete(lb)
+    array.clear(bdgPool)
+    if showBadges and array.size(srLv) > 0
+        for i = 0 to array.size(srLv) - 1
+            stI = array.get(epSt, i)
+            scI = array.get(srTch, i) - array.get(srVio, i)
+            if stI >= 1 and stI <= 3 and array.get(srTch, i) >= 2 and scI > 0
+                lvV = array.get(srLv, i)
+                q = f_lvlQ(i)
+                lvStars = f_qStars(q)
+                isSupB = lvV < close
+                sysOK = hazir and guven >= 45
+                bc = not sysOK ? color.new(color.gray, 60) :
+                     q >= 65 ? color.new(isSupB ? #1b5e20 : #b71c1c, 20) :
+                     q >= 45 ? color.new(color.orange, 35) : color.new(color.gray, 60)
+                tCnt = array.get(epTepkiCnt, i)
+                aR = tCnt > 0 ? array.get(epReactSum, i) / tCnt : 0.0
+                tip = "Kalite: " + str.tostring(q) + "/100" +
+                     "\nİlk temas: " + (array.get(epFirstDone, i) ? (array.get(epFirstOK, i) ? "TEPKİ ✓" : "BAŞARISIZ ✗") : "henüz yok") +
+                     "\nTepki: " + str.tostring(tCnt) + " kez" + (tCnt > 0 ? ", ort " + str.tostring(aR, "0.00") + " ATR" : "") +
+                     "\nTemas / İhlal: " + str.tostring(array.get(srTch, i)) + " / " + str.tostring(array.get(srVio, i))
+                btxt = advMode ? f_stars(lvStars) + " " + str.tostring(q) : f_stars(lvStars)
+                array.push(bdgPool, label.new(bar_index + 3, lvV, btxt, color = bc, textcolor = color.white, size = size.tiny, style = label.style_label_left, tooltip = tip))
+
+// Aktif bölge sınıf sayımı (özet paneli için; rozetle AYNI kalite formülü)
+int nStrong = 0
+int nMid = 0
+int nWeak = 0
+if array.size(srLv) > 0
+    for i = 0 to array.size(srLv) - 1
+        stI = array.get(epSt, i)
+        scI = array.get(srTch, i) - array.get(srVio, i)
+        if stI >= 1 and stI <= 3 and array.get(srTch, i) >= 2 and scI > 0
+            q = f_lvlQ(i)
+            if q >= 65
+                nStrong += 1
+            else if q >= 45
+                nMid += 1
+            else
+                nWeak += 1
+
+// ============================================================================
+//  PANEL  (varsayılan: sade trader özeti; Gelişmiş Mod: ham istatistikler)
+// ============================================================================
+hd = color.new(color.black, 10)
+kb = color.new(color.black, 25)
+var table dbg = table.new(position.top_right, 2, 15, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+if showPanel and barstate.islast
+    if not advMode
+        // ---- SADE GÖRÜNÜM ----
+        tc(dbg, 0, 0, "M2 BÖLGE KALİTESİ", hd)
+        tc(dbg, 1, 0, "Audit v1",          hd)
+        tc(dbg, 0, 1, "Durum",             kb)
+        tc(dbg, 1, 1, hazir and okSample ? "HAZIR" : "VERİ TOPLANIYOR", color.new(hazir and okSample ? color.green : color.orange, 40))
+        tc(dbg, 0, 2, "Güven Puanı",       kb)
+        tc(dbg, 1, 2, hazir ? str.tostring(guven) + " / 100" + (okSample ? "" : "  (ön izleme)") : "-", sinifC)
+        tc(dbg, 0, 3, "Değerlendirme",     kb)
+        tc(dbg, 1, 3, hazir ? f_stars(yildizN) + "  " + sinif : "-", sinifC)
+        tc(dbg, 0, 4, "Aktif bölgeler",    kb)
+        tc(dbg, 1, 4, str.tostring(nStrong) + " güçlü / " + str.tostring(nMid) + " orta / " + str.tostring(nWeak) + " zayıf", kb)
+        tc(dbg, 0, 5, "Yorum",             kb)
+        tc(dbg, 1, 5, yorum,               kb)
+    else
+        // ---- GELİŞMİŞ MOD: ham istatistikler (audit hesapları birebir) ----
+        tc(dbg, 0, 0,  "M2 AUDIT",            hd)
+        tc(dbg, 1, 0,  "Gelişmiş  ·  Güven " + (hazir ? str.tostring(guven) : "-"), hd)
+        tc(dbg, 0, 1,  "Örneklem (episode)",  kb)
+        tc(dbg, 1, 1,  str.tostring(cntValid) + (okSample ? "  YETERLİ" : "  YETERSİZ (min 30)"), color.new(okSample ? color.green : color.red, 40))
+        tc(dbg, 0, 2,  "Geçmiş bar",          kb)
+        tc(dbg, 1, 2,  str.tostring(bar_index) + (okBars ? "" : "  AZ (min 600)"), color.new(okBars ? color.gray : color.orange, 40))
+        tc(dbg, 0, 3,  "K1: İlk temas TEPKİ", kb)
+        tc(dbg, 1, 3,  f_pct(firstWin, firstN), color.new(firstN > 0 and firstWin * 100 >= firstN * 55 ? color.green : color.orange, 40))
+        tc(dbg, 0, 4,  "TEPKİ / ZAYIF / KIRILDI", kb)
+        tc(dbg, 1, 4,  str.tostring(tepkiN) + " / " + str.tostring(zayifN) + " / " + str.tostring(kirN), kb)
+        tc(dbg, 0, 5,  "Çalışma oranı",       kb)
+        tc(dbg, 1, 5,  f_pct(tepkiN, calisma), kb)
+        tc(dbg, 0, 6,  "Ort. tepki (xATR)",   kb)
+        tc(dbg, 1, 6,  tepkiN > 0 ? str.tostring(reactSum / tepkiN, "0.00") : "-", kb)
+        tc(dbg, 0, 7,  "K3: Ort. yaşam (bar)", kb)
+        tc(dbg, 1, 7,  cntDead > 0 ? str.tostring(lifeSum / cntDead) : "-", kb)
+        tc(dbg, 0, 8,  "K3: Kırılım öncesi test", kb)
+        tc(dbg, 1, 8,  cntDead > 0 ? str.tostring(testsSum * 1.0 / cntDead, "0.0") : "-", kb)
+        tc(dbg, 0, 9,  "K2: Rank1 tepki",     kb)
+        tc(dbg, 1, 9,  f_rankRow(0),          kb)
+        tc(dbg, 0, 10, "K2: Rank2 tepki",     kb)
+        tc(dbg, 1, 10, f_rankRow(1),          kb)
+        tc(dbg, 0, 11, "K2: Rank3 tepki",     kb)
+        tc(dbg, 1, 11, f_rankRow(2),          kb)
+        tc(dbg, 0, 12, "Rank4+ tepki",        kb)
+        tc(dbg, 1, 12, f_rankRow(3),          kb)
+        tc(dbg, 0, 13, "K4: Bağımlı temas",   kb)
+        tc(dbg, 1, 13, f_pct(depN, nearN),    color.new(nearN > 0 and depN * 100 >= nearN * 60 ? color.orange : color.gray, 40))
+        tc(dbg, 0, 14, "Ölen / Aktif seviye", kb)
+        tc(dbg, 1, 14, str.tostring(cntDead) + " / " + str.tostring(cntValid - cntDead), kb)

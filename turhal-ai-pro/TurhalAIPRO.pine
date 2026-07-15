@@ -1,0 +1,480 @@
+//@version=6
+// ============================================================================
+//  Turhal AI PRO  —  Smart Money Concepts (SMC) System   ·   V3
+//  Structure(BOS/CHoCH) · Trend · MTF · ATR/Vol filters · EQH/EQL ·
+//  Liquidity-sweep grading · Adaptive swings · Order Blocks · Fair Value Gaps ·
+//  OB/FVG confluence · Premium/Discount · Entry Engine (SL/TP1-3, RR, 0-100
+//  confidence) · High-quality alerts · Object auto-cleanup.
+//  Author: berkayturhal38 | License: MPL-2.0
+//  NON-REPAINT: confirmed pivots; every signal commits on bar close
+//  (barstate.isconfirmed); MTF via lookahead_off; zones anchor to closed bars.
+// ============================================================================
+indicator("Turhal AI PRO — V3", "Turhal AI PRO", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 200)
+
+// ============================================================================
+//  INPUTS
+// ============================================================================
+gS = "Structure"
+swingLen   = input.int(10, "Base Swing Length", minval = 2, maxval = 100, group = gS)
+adaptive   = input.bool(true, "Adaptive Swing Length", group = gS)
+showSwings = input.bool(true, "Show Swing Points", group = gS)
+showBOS    = input.bool(true, "Show BOS",   group = gS)
+showCHOCH  = input.bool(true, "Show CHoCH", group = gS)
+
+gF = "Filters"
+useATR  = input.bool(true, "ATR Displacement Filter", group = gF)
+atrLen  = input.int(14, "ATR Length", minval = 1, group = gF)
+atrMult = input.float(0.7, "Min Body / ATR", minval = 0.0, step = 0.1, group = gF)
+useVol  = input.bool(true, "Volume Filter", group = gF)
+volLen  = input.int(20, "Volume MA Length", minval = 1, group = gF)
+volMult = input.float(1.2, "Min Volume / MA", minval = 0.0, step = 0.1, group = gF)
+
+gSw = "Liquidity Sweep"
+useSweep      = input.bool(true, "Grade breaks by Liquidity Sweep", group = gSw)
+sweepLookback = input.int(15, "Sweep Lookback (bars)", minval = 1, group = gSw)
+
+gM = "Multi-Timeframe"
+mtfFilter = input.bool(true, "Require MTF Alignment", group = gM)
+htfTf1    = input.timeframe("60",  "Higher Timeframe 1", group = gM)
+htfTf2    = input.timeframe("240", "Higher Timeframe 2", group = gM)
+
+gEQ = "Equal Highs / Lows"
+showEQ    = input.bool(true, "Show Equal Highs/Lows", group = gEQ)
+eqAtrMult = input.float(0.1, "Equal Tolerance / ATR", minval = 0.01, step = 0.05, group = gEQ)
+
+gOB = "Order Blocks"
+showOB    = input.bool(true, "Show Order Blocks", group = gOB)
+obBody    = input.bool(false, "OB Use Candle Body", group = gOB)
+obMinAtr  = input.float(0.0, "Min OB Height / ATR", minval = 0.0, step = 0.1, group = gOB)
+maxOB     = input.int(6, "Max Active Order Blocks", minval = 1, maxval = 20, group = gOB)
+obKeepMit = input.bool(true, "Keep Mitigated OB (faded)", group = gOB)
+obTransp  = input.int(82, "OB Transparency", minval = 0, maxval = 95, group = gOB)
+
+gFV = "Fair Value Gaps"
+showFVG   = input.bool(true, "Show FVG", group = gFV)
+fvgMinAtr = input.float(0.15, "Min FVG Height / ATR", minval = 0.0, step = 0.05, group = gFV)
+maxFVG    = input.int(8, "Max Active FVG", minval = 1, maxval = 20, group = gFV)
+fvgKeepMit = input.bool(true, "Keep Filled FVG (faded)", group = gFV)
+fvgTransp = input.int(88, "FVG Transparency", minval = 0, maxval = 95, group = gFV)
+
+gPD = "Premium / Discount"
+showPD   = input.bool(true, "Show Premium/Discount", group = gPD)
+
+gE = "Entry Engine"
+showEntry      = input.bool(true, "Show Trade Setups", group = gE)
+entryThreshold = input.int(70, "Min Confidence (%)", minval = 0, maxval = 100, group = gE)
+needDiscount   = input.bool(true, "Longs in Discount / Shorts in Premium", group = gE)
+needConfluence = input.bool(true, "Require FVG confluence", group = gE)
+confLookback   = input.int(10, "Confluence Lookback (bars)", minval = 1, group = gE)
+slAtrMult      = input.float(1.0, "SL ATR Buffer", minval = 0.0, step = 0.1, group = gE)
+rr1 = input.float(1.0, "TP1 (R)", minval = 0.1, step = 0.1, group = gE)
+rr2 = input.float(2.0, "TP2 (R)", minval = 0.1, step = 0.1, group = gE)
+rr3 = input.float(3.0, "TP3 (R)", minval = 0.1, step = 0.1, group = gE)
+alertsHi = input.bool(true, "Alerts (high-quality only)", group = gE)
+
+gO = "Performance"
+maxObj = input.int(120, "Max Drawn Objects (auto-clean)", minval = 10, maxval = 500, group = gO)
+
+gC = "Colors"
+bullCol  = input.color(#26a69a, "Bullish", group = gC)
+bearCol  = input.color(#ef5350, "Bearish", group = gC)
+swingCol = input.color(#787b86, "Swing Points", group = gC)
+eqCol    = input.color(#ffb300, "Equal H/L", group = gC)
+obBullC  = input.color(#26a69a, "Bullish OB", group = gC)
+obBearC  = input.color(#ef5350, "Bearish OB", group = gC)
+fvgBullC = input.color(#42bda8, "Bullish FVG", group = gC)
+fvgBearC = input.color(#e0736e, "Bearish FVG", group = gC)
+premCol  = input.color(#ef5350, "Premium", group = gC)
+discCol  = input.color(#26a69a, "Discount", group = gC)
+
+gD = "Dashboard"
+showDash = input.bool(true, "Show Dashboard", group = gD)
+
+// ============================================================================
+//  POOLS  (parallel arrays — no UDT, mobile-paste safe)
+// ============================================================================
+var line[]  poolL = array.new<line>()
+var label[] poolB = array.new<label>()
+var box[]   obZbx  = array.new<box>()
+var float[] obZtop = array.new<float>()
+var float[] obZbot = array.new<float>()
+var int[]   obZdir = array.new<int>()
+var bool[]  obZmit = array.new<bool>()
+var box[]   fvZbx  = array.new<box>()
+var float[] fvZtop = array.new<float>()
+var float[] fvZbot = array.new<float>()
+var int[]   fvZdir = array.new<int>()
+var bool[]  fvZmit = array.new<bool>()
+
+regL(line ln) =>
+    array.push(poolL, ln)
+    if array.size(poolL) > maxObj
+        line.delete(array.shift(poolL))
+regB(label lb) =>
+    array.push(poolB, lb)
+    if array.size(poolB) > maxObj
+        label.delete(array.shift(poolB))
+
+// Generic zone factory & mitigation (DRY for OB + FVG)
+f_addZone(box[] aBx, float[] aTop, float[] aBot, int[] aDir, bool[] aMit, int dir, float top, float bot, int x, int maxN, color col, int tr) =>
+    bx = box.new(x, top, bar_index, bot, xloc = xloc.bar_index, extend = extend.right, bgcolor = color.new(col, tr), border_color = color.new(col, 45), border_width = 1)
+    array.push(aBx, bx)
+    array.push(aTop, top)
+    array.push(aBot, bot)
+    array.push(aDir, dir)
+    array.push(aMit, false)
+    if array.size(aBx) > maxN
+        box.delete(array.shift(aBx))
+        array.shift(aTop)
+        array.shift(aBot)
+        array.shift(aDir)
+        array.shift(aMit)
+    bx
+
+f_mitigate(box[] aBx, float[] aTop, float[] aBot, int[] aDir, bool[] aMit, bool keep, color cUp, color cDn, int tr) =>
+    if array.size(aBx) > 0
+        for i = 0 to array.size(aBx) - 1
+            if not array.get(aMit, i)
+                dir = array.get(aDir, i)
+                hit = dir == 1 ? low <= array.get(aTop, i) : high >= array.get(aBot, i)
+                if hit
+                    array.set(aMit, i, true)
+                    bx = array.get(aBx, i)
+                    if keep
+                        box.set_extend(bx, extend.none)
+                        box.set_right(bx, bar_index)
+                        box.set_bgcolor(bx, color.new(dir == 1 ? cUp : cDn, math.min(95, tr + 10)))
+                    else
+                        box.delete(bx)
+
+// ============================================================================
+//  REUSABLE TREND ENGINE  (higher timeframes)
+// ============================================================================
+f_trend() =>
+    h = ta.pivothigh(swingLen, swingLen)
+    l = ta.pivotlow(swingLen, swingLen)
+    var float uL = na
+    var float dL = na
+    var bool  uB = false
+    var bool  dB = false
+    var int   t  = 0
+    if not na(h)
+        uL := h
+        uB := false
+    if not na(l)
+        dL := l
+        dB := false
+    if not na(uL) and not uB and close > uL
+        uB := true
+        t  := 1
+    if not na(dL) and not dB and close < dL
+        dB := true
+        t  := -1
+    t
+
+htf1 = request.security(syminfo.tickerid, htfTf1, f_trend(), lookahead = barmerge.lookahead_off)
+htf2 = request.security(syminfo.tickerid, htfTf2, f_trend(), lookahead = barmerge.lookahead_off)
+
+// ============================================================================
+//  VOLATILITY & FILTERS
+// ============================================================================
+atrVal   = ta.atr(atrLen)
+bodySize = math.abs(close - open)
+volMA    = ta.sma(volume, volLen)
+atrOK    = not useATR or (not na(atrVal) and bodySize >= atrVal * atrMult)
+volOK    = not useVol or na(volume) or (not na(volMA) and volume >= volMA * volMult)
+strong   = atrOK and volOK
+bullMTFok = not mtfFilter or (htf1 >= 0 and htf2 >= 0)
+bearMTFok = not mtfFilter or (htf1 <= 0 and htf2 <= 0)
+
+// ============================================================================
+//  ADAPTIVE SWING LENGTH
+// ============================================================================
+shortLen = math.max(2, int(swingLen * 0.5))
+midLen   = swingLen
+longLen  = math.min(200, swingLen * 2)
+atrSlow  = ta.sma(atrVal, 100)
+volRatio = (not na(atrSlow) and atrSlow > 0) ? atrVal / atrSlow : 1.0
+useShort = adaptive and volRatio < 0.85
+useLong  = adaptive and volRatio > 1.20
+effLen   = useLong ? longLen : useShort ? shortLen : midLen
+phS = ta.pivothigh(shortLen, shortLen)
+phM = ta.pivothigh(midLen,   midLen)
+phL = ta.pivothigh(longLen,  longLen)
+plS = ta.pivotlow(shortLen, shortLen)
+plM = ta.pivotlow(midLen,   midLen)
+plL = ta.pivotlow(longLen,  longLen)
+ph  = useLong ? phL : useShort ? phS : phM
+pl  = useLong ? plL : useShort ? plS : plM
+
+// ============================================================================
+//  STATE
+// ============================================================================
+var float lastPH = na
+var int   lastPHx = na
+var float lastPL = na
+var int   lastPLx = na
+var float upLevel = na
+var int   upX = na
+var bool  upBroken = false
+var float dnLevel = na
+var int   dnX = na
+var bool  dnBroken = false
+var int   trend = 0
+var int   sweepBullBar = na
+var int   sweepBearBar = na
+var int   bullFvgBar = na
+var int   bearFvgBar = na
+var int   bearIdx = na
+var float bearHi = na
+var float bearLo = na
+var float bearBT = na
+var float bearBB = na
+var int   bullIdx = na
+var float bullHi = na
+var float bullLo = na
+var float bullBT = na
+var float bullBB = na
+
+if close < open
+    bearIdx := bar_index
+    bearHi  := high
+    bearLo  := low
+    bearBT  := open
+    bearBB  := close
+if close > open
+    bullIdx := bar_index
+    bullHi  := high
+    bullLo  := low
+    bullBT  := close
+    bullBB  := open
+
+// ============================================================================
+//  CONFIDENCE HELPERS
+// ============================================================================
+f_clamp100(float v) => int(math.round(math.max(0.0, math.min(100.0, v))))
+
+// ============================================================================
+//  MODULE 1 — SWING DETECTION + EQUAL HIGH/LOW LIQUIDITY
+// ============================================================================
+if not na(ph)
+    phx   = bar_index - effLen
+    phLbl = na(lastPH) ? "HH" : (ph > lastPH ? "HH" : "LH")
+    if showSwings
+        regB(label.new(phx, ph, phLbl, xloc = xloc.bar_index, style = label.style_label_down, color = color.new(swingCol, 20), textcolor = color.white, size = size.tiny))
+    if showEQ and not na(lastPH) and not na(atrVal) and math.abs(ph - lastPH) <= atrVal * eqAtrMult
+        regL(line.new(lastPHx, lastPH, phx, ph, xloc = xloc.bar_index, color = eqCol, width = 1, style = line.style_dotted))
+        regB(label.new(phx, math.max(ph, lastPH), "EQH", xloc = xloc.bar_index, style = label.style_label_down, color = color.new(eqCol, 20), textcolor = color.white, size = size.tiny))
+    lastPH   := ph
+    lastPHx  := phx
+    upLevel  := ph
+    upX      := phx
+    upBroken := false
+
+if not na(pl)
+    plx   = bar_index - effLen
+    plLbl = na(lastPL) ? "LL" : (pl < lastPL ? "LL" : "HL")
+    if showSwings
+        regB(label.new(plx, pl, plLbl, xloc = xloc.bar_index, style = label.style_label_up, color = color.new(swingCol, 20), textcolor = color.white, size = size.tiny))
+    if showEQ and not na(lastPL) and not na(atrVal) and math.abs(pl - lastPL) <= atrVal * eqAtrMult
+        regL(line.new(lastPLx, lastPL, plx, pl, xloc = xloc.bar_index, color = eqCol, width = 1, style = line.style_dotted))
+        regB(label.new(plx, math.min(pl, lastPL), "EQL", xloc = xloc.bar_index, style = label.style_label_up, color = color.new(eqCol, 20), textcolor = color.white, size = size.tiny))
+    lastPL   := pl
+    lastPLx  := plx
+    dnLevel  := pl
+    dnX      := plx
+    dnBroken := false
+
+// ============================================================================
+//  MODULE — FAIR VALUE GAP  (3-candle imbalance, confirmed on close)
+// ============================================================================
+if showFVG and barstate.isconfirmed and not na(atrVal)
+    if low > high[2] and (low - high[2]) >= atrVal * fvgMinAtr
+        f_addZone(fvZbx, fvZtop, fvZbot, fvZdir, fvZmit, 1, low, high[2], bar_index - 1, maxFVG, fvgBullC, fvgTransp)
+        bullFvgBar := bar_index
+    if high < low[2] and (low[2] - high) >= atrVal * fvgMinAtr
+        f_addZone(fvZbx, fvZtop, fvZbot, fvZdir, fvZmit, -1, low[2], high, bar_index - 1, maxFVG, fvgBearC, fvgTransp)
+        bearFvgBar := bar_index
+
+// ============================================================================
+//  LIQUIDITY SWEEP DETECTION
+// ============================================================================
+if not na(dnLevel) and low < dnLevel and close > dnLevel
+    sweepBullBar := bar_index
+if not na(upLevel) and high > upLevel and close < upLevel
+    sweepBearBar := bar_index
+sweptBull = not na(sweepBullBar) and (bar_index - sweepBullBar) <= sweepLookback
+sweptBear = not na(sweepBearBar) and (bar_index - sweepBearBar) <= sweepLookback
+confBull = not na(bullFvgBar) and (bar_index - bullFvgBar) <= confLookback
+confBear = not na(bearFvgBar) and (bar_index - bearFvgBar) <= confLookback
+
+// ============================================================================
+//  ZONE MITIGATION  (bounded loops over active zones only)
+// ============================================================================
+f_mitigate(obZbx, obZtop, obZbot, obZdir, obZmit, obKeepMit,  obBullC,  obBearC,  obTransp)
+f_mitigate(fvZbx, fvZtop, fvZbot, fvZdir, fvZmit, fvgKeepMit, fvgBullC, fvgBearC, fvgTransp)
+
+// ============================================================================
+//  PREMIUM / DISCOUNT  (current dealing range equilibrium)
+// ============================================================================
+pdHi = lastPH
+pdLo = lastPL
+pdEq = (not na(pdHi) and not na(pdLo)) ? (pdHi + pdLo) / 2 : na
+inDiscount = not na(pdEq) and close < pdEq
+inPremium  = not na(pdEq) and close > pdEq
+
+var line  eqLine  = line.new(na, na, na, na, xloc = xloc.bar_index, color = color.new(color.gray, 20), width = 1, style = line.style_dotted)
+var box   premBox = box.new(na, na, na, na, xloc = xloc.bar_index, bgcolor = color.new(premCol, 92), border_color = color.new(premCol, 100))
+var box   discBox = box.new(na, na, na, na, xloc = xloc.bar_index, bgcolor = color.new(discCol, 92), border_color = color.new(discCol, 100))
+if showPD and barstate.islast and not na(pdEq)
+    lft = int(math.min(nz(lastPHx, bar_index - 50), nz(lastPLx, bar_index - 50)))
+    line.set_xy1(eqLine, lft, pdEq)
+    line.set_xy2(eqLine, bar_index, pdEq)
+    box.set_lefttop(premBox, lft, pdHi)
+    box.set_rightbottom(premBox, bar_index, pdEq)
+    box.set_lefttop(discBox, lft, pdEq)
+    box.set_rightbottom(discBox, bar_index, pdLo)
+
+// ============================================================================
+//  MODULE 2 — MARKET STRUCTURE (BOS/CHoCH) + ORDER BLOCK CREATION
+// ============================================================================
+bullBreak = not na(upLevel) and not upBroken and barstate.isconfirmed and close > upLevel and strong and bullMTFok
+bearBreak = not na(dnLevel) and not dnBroken and barstate.isconfirmed and close < dnLevel and strong and bearMTFok
+
+isChochUp = false
+isChochDn = false
+if bullBreak
+    upBroken := true
+    isChochUp := trend == -1
+    trend := 1
+    lowConf = useSweep and not sweptBull
+    if isChochUp ? showCHOCH : showBOS
+        regL(line.new(upX, upLevel, bar_index, upLevel, xloc = xloc.bar_index, color = bullCol, width = 2, style = isChochUp ? line.style_dashed : line.style_solid))
+        regB(label.new(bar_index, upLevel, (isChochUp ? "CHoCH" : "BOS") + (lowConf ? " ?" : ""), xloc = xloc.bar_index, style = label.style_label_down, color = color.new(bullCol, lowConf ? 55 : 15), textcolor = color.white, size = size.small))
+    if showOB and not na(bearLo) and not na(bearHi)
+        obTop = obBody ? bearBT : bearHi
+        obBot = obBody ? bearBB : bearLo
+        if na(atrVal) or (obTop - obBot) >= atrVal * obMinAtr
+            bx = f_addZone(obZbx, obZtop, obZbot, obZdir, obZmit, 1, obTop, obBot, bearIdx, maxOB, obBullC, obTransp)
+            regB(label.new(bar_index, (obTop + obBot) / 2, "OB", xloc = xloc.bar_index, style = label.style_label_left, color = color.new(obBullC, 30), textcolor = color.white, size = size.tiny))
+
+if bearBreak
+    dnBroken := true
+    isChochDn := trend == 1
+    trend := -1
+    lowConf = useSweep and not sweptBear
+    if isChochDn ? showCHOCH : showBOS
+        regL(line.new(dnX, dnLevel, bar_index, dnLevel, xloc = xloc.bar_index, color = bearCol, width = 2, style = isChochDn ? line.style_dashed : line.style_solid))
+        regB(label.new(bar_index, dnLevel, (isChochDn ? "CHoCH" : "BOS") + (lowConf ? " ?" : ""), xloc = xloc.bar_index, style = label.style_label_up, color = color.new(bearCol, lowConf ? 55 : 15), textcolor = color.white, size = size.small))
+    if showOB and not na(bullLo) and not na(bullHi)
+        obTop = obBody ? bullBT : bullHi
+        obBot = obBody ? bullBB : bullLo
+        if na(atrVal) or (obTop - obBot) >= atrVal * obMinAtr
+            bx = f_addZone(obZbx, obZtop, obZbot, obZdir, obZmit, -1, obTop, obBot, bullIdx, maxOB, obBearC, obTransp)
+            regB(label.new(bar_index, (obTop + obBot) / 2, "OB", xloc = xloc.bar_index, style = label.style_label_left, color = color.new(obBearC, 30), textcolor = color.white, size = size.tiny))
+
+// ============================================================================
+//  MODULE — ENTRY ENGINE  (fires only when ALL conditions align)
+// ============================================================================
+f_confLong() =>
+    m = (not na(htf1) and htf1 == 1 ? 15.0 : 0.0) + (not na(htf2) and htf2 == 1 ? 20.0 : 0.0)
+    d = (not na(atrVal) and atrVal > 0) ? math.min(25.0, bodySize / atrVal * 17.0) : 0.0
+    v = (not na(volume) and not na(volMA) and volMA > 0) ? math.min(15.0, volume / volMA * 8.0) : 0.0
+    s = sweptBull ? 10.0 : 0.0
+    p = inDiscount ? 5.0 : 0.0
+    c = confBull ? 10.0 : 0.0
+    f_clamp100(m + d + v + s + p + c)
+
+f_confShort() =>
+    m = (not na(htf1) and htf1 == -1 ? 15.0 : 0.0) + (not na(htf2) and htf2 == -1 ? 20.0 : 0.0)
+    d = (not na(atrVal) and atrVal > 0) ? math.min(25.0, bodySize / atrVal * 17.0) : 0.0
+    v = (not na(volume) and not na(volMA) and volMA > 0) ? math.min(15.0, volume / volMA * 8.0) : 0.0
+    s = sweptBear ? 10.0 : 0.0
+    p = inPremium ? 5.0 : 0.0
+    c = confBear ? 10.0 : 0.0
+    f_clamp100(m + d + v + s + c + p)
+
+f_drawTrade(int dir, float entry, float sl, float t1, float t2, float t3, int conf, float rr) =>
+    col = dir == 1 ? bullCol : bearCol
+    x2  = bar_index + 12
+    regL(line.new(bar_index, entry, x2, entry, xloc = xloc.bar_index, color = color.new(color.white, 20), width = 2))
+    regL(line.new(bar_index, sl, x2, sl, xloc = xloc.bar_index, color = color.new(bearCol, 10), width = 1, style = line.style_dashed))
+    regL(line.new(bar_index, t1, x2, t1, xloc = xloc.bar_index, color = color.new(bullCol, 10), width = 1, style = line.style_dashed))
+    regL(line.new(bar_index, t2, x2, t2, xloc = xloc.bar_index, color = color.new(bullCol, 30), width = 1, style = line.style_dashed))
+    regL(line.new(bar_index, t3, x2, t3, xloc = xloc.bar_index, color = color.new(bullCol, 45), width = 1, style = line.style_dashed))
+    txt = (dir == 1 ? "LONG " : "SHORT ") + str.tostring(conf) + "%\nRR 1:" + str.tostring(rr, "0.0") + "\nSL " + str.tostring(sl, format.mintick)
+    regB(label.new(bar_index, dir == 1 ? sl : sl, txt, xloc = xloc.bar_index, style = dir == 1 ? label.style_label_up : label.style_label_down, color = color.new(col, 15), textcolor = color.white, size = size.small))
+
+longEntry  = false
+shortEntry = false
+var int lastEntryBar = na
+
+longOK = showEntry and bullBreak and (not needDiscount or inDiscount) and (not needConfluence or confBull) and (na(lastEntryBar) or bar_index > lastEntryBar)
+if longOK
+    conf = f_confLong()
+    slL  = (na(lastPL) ? low : math.min(lastPL, low)) - (na(atrVal) ? 0.0 : atrVal * slAtrMult)
+    riskL = close - slL
+    if conf >= entryThreshold and riskL > 0
+        longEntry := true
+        lastEntryBar := bar_index
+        t1 = close + riskL * rr1
+        t2 = close + riskL * rr2
+        t3 = close + riskL * rr3
+        f_drawTrade(1, close, slL, t1, t2, t3, conf, rr2)
+
+shortOK = showEntry and bearBreak and (not needDiscount or inPremium) and (not needConfluence or confBear) and (na(lastEntryBar) or bar_index > lastEntryBar)
+if shortOK
+    conf = f_confShort()
+    slS  = (na(lastPH) ? high : math.max(lastPH, high)) + (na(atrVal) ? 0.0 : atrVal * slAtrMult)
+    riskS = slS - close
+    if conf >= entryThreshold and riskS > 0
+        shortEntry := true
+        lastEntryBar := bar_index
+        t1 = close - riskS * rr1
+        t2 = close - riskS * rr2
+        t3 = close - riskS * rr3
+        f_drawTrade(-1, close, slS, t1, t2, t3, conf, rr2)
+
+// ============================================================================
+//  ALERTS  (high-quality entries only)
+// ============================================================================
+alertcondition(longEntry,  "LONG Setup",  "Turhal AI PRO: high-quality LONG setup")
+alertcondition(shortEntry, "SHORT Setup", "Turhal AI PRO: high-quality SHORT setup")
+if alertsHi and (longEntry or shortEntry)
+    alert("Turhal AI PRO: " + (longEntry ? "LONG" : "SHORT") + " setup on " + syminfo.ticker, alert.freq_once_per_bar)
+
+// ============================================================================
+//  SIGNAL STRENGTH (trend-quality composite for dashboard)
+// ============================================================================
+supSweep = trend == 1 ? sweptBull : trend == -1 ? sweptBear : false
+sMTF = trend == 0 ? 0.0 : ((not na(htf1) and htf1 == trend) ? 20.0 : 0.0) + ((not na(htf2) and htf2 == trend) ? 30.0 : 0.0)
+sATR = (not na(atrVal) and atrVal > 0) ? math.min(20.0, bodySize / atrVal * 13.0) : 0.0
+sVOL = (not na(volume) and not na(volMA) and volMA > 0) ? math.min(20.0, volume / volMA * 10.0) : 0.0
+sSWP = supSweep ? 10.0 : 0.0
+score = f_clamp100(sMTF + sATR + sVOL + sSWP)
+
+// ============================================================================
+//  MODULE 3 — DASHBOARD
+// ============================================================================
+f_trTxt(t) => t == 1 ? "BULLISH" : t == -1 ? "BEARISH" : "NEUTRAL"
+f_trCol(t) => t == 1 ? bullCol : t == -1 ? bearCol : color.gray
+
+var table dash = table.new(position.top_right, 2, 6, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+if showDash and barstate.islast
+    hd = color.new(color.black, 10)
+    kb = color.new(color.black, 25)
+    scCol = score >= 70 ? bullCol : score >= 40 ? #ffb300 : color.gray
+    pdTxt = na(pdEq) ? "-" : inDiscount ? "DISCOUNT" : "PREMIUM"
+    pdC   = na(pdEq) ? color.gray : inDiscount ? discCol : premCol
+    table.cell(dash, 0, 0, "Turhal AI PRO", text_color = color.white, bgcolor = hd, text_size = size.small)
+    table.cell(dash, 1, 0, "V3", text_color = color.white, bgcolor = hd, text_size = size.small)
+    table.cell(dash, 0, 1, "Trend", text_color = color.white, bgcolor = kb, text_size = size.small)
+    table.cell(dash, 1, 1, f_trTxt(trend), text_color = color.white, bgcolor = color.new(f_trCol(trend), 25), text_size = size.small)
+    table.cell(dash, 0, 2, "1H", text_color = color.white, bgcolor = kb, text_size = size.small)
+    table.cell(dash, 1, 2, f_trTxt(htf1), text_color = color.white, bgcolor = color.new(f_trCol(htf1), 25), text_size = size.small)
+    table.cell(dash, 0, 3, "4H", text_color = color.white, bgcolor = kb, text_size = size.small)
+    table.cell(dash, 1, 3, f_trTxt(htf2), text_color = color.white, bgcolor = color.new(f_trCol(htf2), 25), text_size = size.small)
+    table.cell(dash, 0, 4, "Zone", text_color = color.white, bgcolor = kb, text_size = size.small)
+    table.cell(dash, 1, 4, pdTxt, text_color = color.white, bgcolor = color.new(pdC, 25), text_size = size.small)
+    table.cell(dash, 0, 5, "Signal", text_color = color.white, bgcolor = kb, text_size = size.small)
+    table.cell(dash, 1, 5, str.tostring(score) + " %", text_color = color.white, bgcolor = color.new(scCol, 20), text_size = size.small)

@@ -1,0 +1,501 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+// © berkayturhal38
+//@version=6
+// ============================================================================
+//  TURHAL REFERENCE CORE  —  v1  (M1: Skorlu Trend Çizgisi + Paralel Kanal)
+//  AMAÇ: Referans sistemin grafik omurgasındaki TL/kanal DAVRANIŞINI bağımsız
+//  bir Pine implementasyonuyla yeniden kurmak (satır satır kopya DEĞİL).
+//  KAPSAM (yalnızca M1):
+//   - 2 katman: Ana (pivot len 20) + Ara (pivot len 10); katman başına son 8 pivot
+//   - Tüm uygun pivot çiftlerinden aday çizgi; her aday geçmişte bar bar test edilir
+//   - Temas: 0.5xATR bölge, temaslar arası >= 5 bar; İhlal: close tabanlı, toleranssız
+//   - maxViol üstü aday elenir; güncel barda close çizgiyi 0.5xATR aşmışsa aday elenir
+//   - Skor = temas*10 - ihlal*3 + uzunluk/100; en yüksek skorlu Up/Dn çizgi seçilir
+//   - Paralel kanal: TL boyunca karşı ekstrem max sapma = offset; >= 2 karşı temas
+//     şartı; orta çizgi = offset/2
+//   - Kırılım: 2 ardışık close ihlali (0.5xATR marj) VEYA 1.0xATR wick big-break
+//     VEYA 1.5xATR far-break; kırılan çizgi 15 bar KESİKLİ archive olarak kalır
+//   - Recompute YALNIZCA yeni onaylı pivot geldiğinde; tüm state isconfirmed'de
+//  YOK: S/R, EMA/KAMA, Fib, FVG, panel, sinyal, strategy, LONG/SHORT, risk.
+//  NON-REPAINT: pivotlar len bar sağ-onay gecikmeli; geçmiş OHLC kendi
+//  buffer'ımızdan okunur (yalnızca kapanmış barlar); future leak yok.
+//  License: MPL-2.0
+// ============================================================================
+indicator("Turhal Reference Core v1", "Turhal RefCore", overlay = true, max_lines_count = 60, max_labels_count = 20)
+
+// ============================================================================
+//  GİRDİLER
+// ============================================================================
+gM = "M1 — Trend Çizgisi Motoru"
+lenMain     = input.int(20, "Ana Katman Pivot Uzunluğu", minval = 5, maxval = 50, group = gM)
+useMid      = input.bool(true, "Ara Katman Aktif", group = gM)
+lenMid      = input.int(10, "Ara Katman Pivot Uzunluğu", minval = 3, maxval = 30, group = gM)
+atrLen      = input.int(14, "ATR Periyodu", minval = 1, group = gM)
+maxViol     = input.int(1, "Maks İhlal (aday eleme)", minval = 0, maxval = 3, group = gM)
+tzK         = input.float(0.5, "Temas Bölgesi (xATR)", minval = 0.1, step = 0.1, group = gM)
+minGap      = input.int(5, "Temaslar Arası Min Bar", minval = 2, maxval = 20, group = gM)
+chTouchK    = input.float(1.0, "Kanal Temas Bölgesi (xATR)", minval = 0.1, step = 0.1, group = gM)
+chMinTouch  = input.int(2, "Kanal İçin Min Karşı Temas", minval = 2, maxval = 5, group = gM)
+wickK       = input.float(1.0, "Big-Break Wick (xATR)", minval = 0.1, step = 0.1, group = gM)
+farK        = input.float(1.5, "Far-Break Wick (xATR)", minval = 0.1, step = 0.1, group = gM)
+archiveBars = input.int(15, "Kırık Çizgi Archive Süresi (bar)", minval = 1, maxval = 30, group = gM)
+rearmBars   = input.int(3, "Kırılım Sonrası Yeni Aday Bekleme (bar)", minval = 0, maxval = 10, group = gM)
+
+gV = "Görünüm"
+showChannel = input.bool(true, "Paralel Kanal + Orta Çizgi", group = gV)
+showArchive = input.bool(true, "Kırık Çizgi Archive (kesikli)", group = gV)
+showLabels  = input.bool(true, "Ana Katman Etiketi (temas + skor)", group = gV)
+colUp       = input.color(color.new(color.lime, 0), "Up TL Rengi", group = gV)
+colDn       = input.color(color.new(color.red, 0),  "Down TL Rengi", group = gV)
+
+// ============================================================================
+//  ORTAK VERİ  (kapalı-bar OHLC buffer'ı: aday taramaları BURADAN okur)
+// ============================================================================
+atr = ta.atr(atrLen)
+phM = ta.pivothigh(lenMain, lenMain)
+plM = ta.pivotlow(lenMain, lenMain)
+phI = ta.pivothigh(lenMid, lenMid)
+plI = ta.pivotlow(lenMid, lenMid)
+
+var float[] bLo = array.new_float()
+var float[] bHi = array.new_float()
+var float[] bC  = array.new_float()
+
+// buffer index: son eleman = şu anki onaylı bar (bar_index). Kesintisiz seri.
+f_at(float[] a, int x) =>
+    i = array.size(a) - 1 - (bar_index - x)
+    i >= 0 and i < array.size(a) ? array.get(a, i) : na
+
+// ============================================================================
+//  PİVOT HAVUZLARI  (katman başına son 8 onaylı pivot; en yeni SONDA)
+// ============================================================================
+var float[] pvLoM = array.new_float()
+var int[]   pxLoM = array.new_int()
+var float[] pvHiM = array.new_float()
+var int[]   pxHiM = array.new_int()
+var float[] pvLoI = array.new_float()
+var int[]   pxLoI = array.new_int()
+var float[] pvHiI = array.new_float()
+var int[]   pxHiI = array.new_int()
+
+f_pushPv(float[] pv, int[] px, float v, int x) =>
+    array.push(pv, v)
+    array.push(px, x)
+    if array.size(pv) > 8
+        array.shift(pv)
+        array.shift(px)
+
+// ============================================================================
+//  SLOT STATE  (4 slot: 0=AnaUp, 1=AnaDn, 2=AraUp, 3=AraDn)
+// ============================================================================
+var float[] slSlope = array.new_float(4, na)
+var float[] slBase  = array.new_float(4, na)
+var int[]   slX     = array.new_int(4, 0)
+var bool[]  slValid = array.new_bool(4, false)
+var bool[]  slBrk   = array.new_bool(4, false)
+var int[]   slBrkBar = array.new_int(4, 0)
+var int[]   slBrkCnt = array.new_int(4, 0)
+var int[]   slTouch = array.new_int(4, 0)
+var float[] slScore = array.new_float(4, 0.0)
+var float[] chOff   = array.new_float(4, 0.0)
+var bool[]  chValid = array.new_bool(4, false)
+// Archive (kırılan çizgi archiveBars boyunca kesikli kalır)
+var float[] arSlope = array.new_float(4, na)
+var float[] arBase  = array.new_float(4, na)
+var int[]   arX     = array.new_int(4, 0)
+var int[]   arBrkBar = array.new_int(4, 0)
+var bool[]  arActive = array.new_bool(4, false)
+
+// ============================================================================
+//  ADAY TARAMA  (tek çift: geçmişi bar bar test et — temas / ihlal / güncel bar)
+// ============================================================================
+f_scanPair(float v2, int x2, float v1, int x1, bool isUp, float tz) =>
+    float slope = (v1 - v2) / (x1 - x2)
+    int span = bar_index - x2
+    int viol = 0
+    int touch = 0
+    int lastT = -999
+    bool ok = span > 0 and span <= 600
+    if ok
+        for b = 1 to span
+            if ok
+                lv = v2 + slope * b
+                pe = isUp ? f_at(bLo, x2 + b) : f_at(bHi, x2 + b)
+                cv = f_at(bC, x2 + b)
+                if not na(pe) and math.abs(pe - lv) < tz and (b - lastT) >= minGap
+                    touch += 1
+                    lastT := b
+                // İhlal: close tabanlı, TOLERANSSIZ ("trendi kıran bar close olmamalı")
+                if not na(cv) and ((isUp and cv < lv) or (not isUp and cv > lv))
+                    viol += 1
+                    if viol > maxViol
+                        ok := false
+    if ok
+        // Güncel bar geçerlilik filtresi
+        curV = v2 + slope * span
+        if (isUp and close < curV - tz) or (not isUp and close > curV + tz)
+            ok := false
+    float sc = touch * 10.0 - viol * 3.0 + span / 100.0
+    [ok, slope, sc, touch]
+
+//  EN İYİ ADAY: havuzdaki tüm uygun çiftler taranır, en yüksek skor kazanır
+f_best(float[] pv, int[] px, bool isUp) =>
+    float bSlope = na
+    float bBase = na
+    int   bX = 0
+    bool  found = false
+    int   bTouch = 0
+    float bScore = -1e18
+    float tz = tzK * atr
+    int n = array.size(pv)
+    if n >= 2 and not na(atr) and atr > 0
+        for i = 0 to n - 2                     // i = ESKİ pivot
+            v2 = array.get(pv, i)
+            x2 = array.get(px, i)
+            for j = i + 1 to n - 1             // j = YENİ pivot
+                v1 = array.get(pv, j)
+                x1 = array.get(px, j)
+                okDir = isUp ? v1 > v2 : v1 < v2   // Up: dipler yükselir, Dn: tepeler düşer
+                if x1 > x2 and okDir
+                    [ok, slp, sc, tch] = f_scanPair(v2, x2, v1, x1, isUp, tz)
+                    if ok and sc > bScore
+                        bScore := sc
+                        bSlope := slp
+                        bBase := v2
+                        bX := x2
+                        found := true
+                        bTouch := tch
+    [found, bSlope, bBase, bX, bTouch, bScore]
+
+// ============================================================================
+//  PARALEL KANAL  (karşı ekstremin max sapması = offset; >= chMinTouch temas)
+// ============================================================================
+f_channel(float slope, float base, int x2, bool isUp) =>
+    int span = bar_index - x2
+    float ext = 0.0
+    if span > 0 and span <= 600
+        for b = 0 to span
+            lv = base + slope * b
+            pe = isUp ? f_at(bHi, x2 + b) : f_at(bLo, x2 + b)
+            if not na(pe)
+                d = isUp ? pe - lv : lv - pe
+                if d > ext
+                    ext := d
+    int tch = 0
+    int lastZ = -999
+    if ext > 0 and span > 0 and span <= 600
+        for b = 0 to span
+            cl = base + slope * b + (isUp ? ext : -ext)
+            pe = isUp ? f_at(bHi, x2 + b) : f_at(bLo, x2 + b)
+            if not na(pe) and math.abs(pe - cl) < atr * chTouchK and (b - lastZ) >= minGap
+                tch += 1
+                lastZ := b
+    [isUp ? ext : -ext, tch >= chMinTouch]
+
+// ============================================================================
+//  SLOT GÜNCELLEME  (yalnızca yeni onaylı pivotta çağrılır)
+// ============================================================================
+f_slotUpdate(int s, bool isUp, float[] pv, int[] px) =>
+    [found, slp, bse, x2v, tch, sc] = f_best(pv, px, isUp)
+    canFill = not array.get(slBrk, s) or (bar_index - array.get(slBrkBar, s)) >= rearmBars
+    if found and canFill
+        // Kırık ama hâlâ görünür çizgi varsa archive'e taşı
+        if array.get(slValid, s) and array.get(slBrk, s)
+            array.set(arSlope, s, array.get(slSlope, s))
+            array.set(arBase, s, array.get(slBase, s))
+            array.set(arX, s, array.get(slX, s))
+            array.set(arBrkBar, s, array.get(slBrkBar, s))
+            array.set(arActive, s, true)
+        array.set(slSlope, s, slp)
+        array.set(slBase, s, bse)
+        array.set(slX, s, x2v)
+        array.set(slValid, s, true)
+        array.set(slBrk, s, false)
+        array.set(slBrkCnt, s, 0)
+        array.set(slTouch, s, tch)
+        array.set(slScore, s, sc)
+        [off, okc] = f_channel(slp, bse, x2v, isUp)
+        array.set(chOff, s, off)
+        array.set(chValid, s, okc)
+
+// ============================================================================
+//  MOTOR  (yalnızca KAPANMIŞ barda: buffer + pivot + recompute + kırılım izleme)
+// ============================================================================
+if barstate.isconfirmed
+    array.push(bLo, low)
+    array.push(bHi, high)
+    array.push(bC, close)
+    if array.size(bC) > 800
+        array.shift(bLo)
+        array.shift(bHi)
+        array.shift(bC)
+
+    // Yeni onaylı pivot -> havuza ekle + SADECE ilgili slotu yeniden hesapla
+    if not na(plM)
+        f_pushPv(pvLoM, pxLoM, plM, bar_index - lenMain)
+        f_slotUpdate(0, true, pvLoM, pxLoM)
+    if not na(phM)
+        f_pushPv(pvHiM, pxHiM, phM, bar_index - lenMain)
+        f_slotUpdate(1, false, pvHiM, pxHiM)
+    if useMid and not na(plI)
+        f_pushPv(pvLoI, pxLoI, plI, bar_index - lenMid)
+        f_slotUpdate(2, true, pvLoI, pxLoI)
+    if useMid and not na(phI)
+        f_pushPv(pvHiI, pxHiI, phI, bar_index - lenMid)
+        f_slotUpdate(3, false, pvHiI, pxHiI)
+
+    // Kırılım izleme (tüm slotlar, her kapanmış barda)
+    if not na(atr)
+        for s = 0 to 3
+            if array.get(slValid, s)
+                isUp = s % 2 == 0
+                nowV = array.get(slBase, s) + array.get(slSlope, s) * (bar_index - array.get(slX, s))
+                if not array.get(slBrk, s)
+                    thr = 0.5 * atr
+                    violated = isUp ? close < nowV - thr : close > nowV + thr
+                    array.set(slBrkCnt, s, violated ? array.get(slBrkCnt, s) + 1 : 0)
+                    bigB = isUp ? low < nowV - atr * wickK : high > nowV + atr * wickK
+                    farB = isUp ? low < nowV - atr * farK  : high > nowV + atr * farK
+                    if array.get(slBrkCnt, s) >= 2 or bigB or farB
+                        array.set(slBrk, s, true)
+                        array.set(slBrkBar, s, bar_index)
+                else
+                    if bar_index - array.get(slBrkBar, s) > archiveBars
+                        array.set(slValid, s, false)
+                // Kanal kırılımı (karşı bant close ile aşılırsa kanal düşer)
+                if array.get(chValid, s) and not array.get(slBrk, s)
+                    chNow = nowV + array.get(chOff, s)
+                    if (isUp and close > chNow + 0.5 * atr) or (not isUp and close < chNow - 0.5 * atr)
+                        array.set(chValid, s, false)
+            if array.get(arActive, s) and bar_index - array.get(arBrkBar, s) > archiveBars
+                array.set(arActive, s, false)
+
+// ============================================================================
+//  ÇİZİM  (islast: sil + yeniden çiz; birikme yok)
+// ============================================================================
+var line[]  dLn = array.new_line()
+var label[] dLb = array.new_label()
+if barstate.islast
+    for ln in dLn
+        line.delete(ln)
+    for lb in dLb
+        label.delete(lb)
+    array.clear(dLn)
+    array.clear(dLb)
+    xR = bar_index + 20
+    for s = 0 to 3
+        layerOn = s < 2 or useMid
+        isUp = s % 2 == 0
+        col = isUp ? colUp : colDn
+        // Archive: kırılan eski çizgi (kesikli, soluk)
+        if showArchive and layerOn and array.get(arActive, s)
+            aX = math.max(array.get(arX, s), bar_index - 500)
+            aY1 = array.get(arBase, s) + array.get(arSlope, s) * (aX - array.get(arX, s))
+            aY2 = array.get(arBase, s) + array.get(arSlope, s) * (xR - array.get(arX, s))
+            array.push(dLn, line.new(aX, aY1, xR, aY2, color = color.new(col, 70), style = line.style_dotted, width = 1))
+        if layerOn and array.get(slValid, s)
+            x0  = array.get(slX, s)
+            x1d = math.max(x0, bar_index - 500)
+            slp = array.get(slSlope, s)
+            bse = array.get(slBase, s)
+            y1 = bse + slp * (x1d - x0)
+            y2 = bse + slp * (xR - x0)
+            brk = array.get(slBrk, s)
+            tch = array.get(slTouch, s)
+            wd  = tch >= 5 ? 3 : tch >= 3 ? 2 : 1
+            tr  = brk ? 70 : s >= 2 ? 45 : 10
+            sty = brk ? line.style_dotted : line.style_solid
+            array.push(dLn, line.new(x1d, y1, xR, y2, color = color.new(col, tr), style = sty, width = wd))
+            if showLabels and s < 2
+                ltxt = (isUp ? "▲ Ana Up" : "▼ Ana Dn") + (brk ? " KIRIK" : "") + "  " + str.tostring(tch) + "t  skor " + str.tostring(array.get(slScore, s), "0.0")
+                array.push(dLb, label.new(xR, y2, ltxt, color = color.new(col, 60), textcolor = color.white, size = size.tiny, style = label.style_label_left))
+            if showChannel and array.get(chValid, s) and not brk
+                off = array.get(chOff, s)
+                array.push(dLn, line.new(x1d, y1 + off, xR, y2 + off, color = color.new(col, s >= 2 ? 55 : 25), style = line.style_solid, width = 1))
+                array.push(dLn, line.new(x1d, y1 + off / 2, xR, y2 + off / 2, color = color.new(col, 65), style = line.style_dashed, width = 1))
+
+// ############################################################################
+//  M2 — SKORLU S/R HAVUZU  →  MERGE  →  TOP-3 DESTEK + TOP-3 DİRENÇ BÖLGESİ
+//  M1'den TAMAMEN BAĞIMSIZ modül; M1 state'ine okuma/yazma YAPMAZ.
+//  Kaynak: yalnızca onaylı pivot high/low. Havuza girişte 0.3xATR merge.
+//  Her seviyede temas (0.5xATR bölge, >= 3 bar gap) ve ihlal (close seviyeyi
+//  0.5xATR marjla KESEREK geçerse) sayılır. Skor = temas - ihlal.
+//  Geçerlilik: temas >= 2 ve skor > 0. Çizimde 0.5xATR final merge + fiyata
+//  göre destek/direnç sınıflaması + yalnızca Top-3 + Top-3 dar bölge kutusu.
+//  Non-repaint: havuz/sayaçlar yalnızca isconfirmed'de; çizim islast'ta.
+// ############################################################################
+gS2 = "M2 — S/R Havuzu"
+srLen     = input.int(10, "S/R Pivot Uzunluğu", minval = 3, maxval = 30, group = gS2)
+srMergeK  = input.float(0.3, "Havuza Giriş Merge (xATR)", minval = 0.05, step = 0.05, group = gS2)
+srTzK     = input.float(0.5, "Temas Bölgesi (xATR)", minval = 0.1, step = 0.1, group = gS2)
+srGap     = input.int(3, "Temaslar Arası Min Bar", minval = 1, maxval = 20, group = gS2)
+srViolK   = input.float(0.5, "İhlal Marjı (xATR)", minval = 0.1, step = 0.1, group = gS2)
+srPoolMax = input.int(20, "Havuz Kapasitesi", minval = 5, maxval = 40, group = gS2)
+srFinalK  = input.float(0.5, "Final Merge (xATR)", minval = 0.1, step = 0.1, group = gS2)
+showSR    = input.bool(true, "S/R Bölgelerini Göster", group = gS2)
+
+srPh = ta.pivothigh(srLen, srLen)
+srPl = ta.pivotlow(srLen, srLen)
+
+// Havuz state: seviye fiyatı + temas + ihlal + son temas barı
+var float[] srLv  = array.new_float()
+var int[]   srTch = array.new_int()
+var int[]   srVio = array.new_int()
+var int[]   srLtb = array.new_int()
+
+f_srAdd(float lv) =>
+    if not na(atr) and atr > 0
+        bool exists = false
+        if array.size(srLv) > 0
+            for i = 0 to array.size(srLv) - 1
+                if math.abs(array.get(srLv, i) - lv) < srMergeK * atr
+                    exists := true
+                    break
+        if not exists
+            array.push(srLv, lv)
+            array.push(srTch, 1)
+            array.push(srVio, 0)
+            array.push(srLtb, bar_index)
+            if array.size(srLv) > srPoolMax
+                array.shift(srLv)
+                array.shift(srTch)
+                array.shift(srVio)
+                array.shift(srLtb)
+
+if barstate.isconfirmed
+    if not na(srPl)
+        f_srAdd(srPl)
+    if not na(srPh)
+        f_srAdd(srPh)
+    if not na(atr) and atr > 0 and array.size(srLv) > 0
+        tzS = srTzK * atr
+        vzS = srViolK * atr
+        for i = 0 to array.size(srLv) - 1
+            lv = array.get(srLv, i)
+            // Temas: bar aralığı 0.5xATR bölgeyle kesişiyor (gap korumalı)
+            if low <= lv + tzS and high >= lv - tzS
+                if bar_index - array.get(srLtb, i) >= srGap
+                    array.set(srTch, i, array.get(srTch, i) + 1)
+                    array.set(srLtb, i, bar_index)
+            // İhlal: close seviyeyi 0.5xATR marjla KESEREK geçti (crossing, süreklilik değil)
+            if (close > lv + vzS and close[1] <= lv + vzS) or (close < lv - vzS and close[1] >= lv - vzS)
+                array.set(srVio, i, array.get(srVio, i) + 1)
+
+// ---- M2 ÇİZİM: geçerli seviyeler -> final merge -> Top-3 x 2 bölge kutusu ----
+var box[]   m2Bx = array.new_box()
+var label[] m2Lb = array.new_label()
+if barstate.islast
+    for bx in m2Bx
+        box.delete(bx)
+    for lb in m2Lb
+        label.delete(lb)
+    array.clear(m2Bx)
+    array.clear(m2Lb)
+    if showSR and not na(atr) and atr > 0 and array.size(srLv) > 0
+        // 1) Geçerlilik filtresi: temas >= 2 ve skor > 0
+        tP = array.new_float()
+        tS = array.new_float()
+        tT = array.new_int()
+        for i = 0 to array.size(srLv) - 1
+            scI = array.get(srTch, i) - array.get(srVio, i)
+            if array.get(srTch, i) >= 2 and scI > 0
+                array.push(tP, array.get(srLv, i))
+                array.push(tS, float(scI))
+                array.push(tT, array.get(srTch, i))
+        // 2) Final merge (0.5xATR): grup ana fiyatı = en yüksek skorlu üye;
+        //    bölge sınırları = grup min/max; skor ve temas TOPLANIR
+        gP  = array.new_float()
+        gSc = array.new_float()
+        gT  = array.new_int()
+        gHi = array.new_float()
+        gLo = array.new_float()
+        nT = array.size(tP)
+        if nT > 0
+            used = array.new_bool(nT, false)
+            for i = 0 to nT - 1
+                if not array.get(used, i)
+                    mainP = array.get(tP, i)
+                    bestS = array.get(tS, i)
+                    hiV = mainP
+                    loV = mainP
+                    sSum = array.get(tS, i)
+                    tSum = array.get(tT, i)
+                    if i < nT - 1
+                        for j = i + 1 to nT - 1
+                            if not array.get(used, j) and math.abs(array.get(tP, j) - mainP) < srFinalK * atr
+                                array.set(used, j, true)
+                                hiV := math.max(hiV, array.get(tP, j))
+                                loV := math.min(loV, array.get(tP, j))
+                                sSum += array.get(tS, j)
+                                tSum += array.get(tT, j)
+                                if array.get(tS, j) > bestS
+                                    bestS := array.get(tS, j)
+                                    mainP := array.get(tP, j)
+                    array.push(gP, mainP)
+                    array.push(gSc, sSum)
+                    array.push(gT, tSum)
+                    array.push(gHi, hiV)
+                    array.push(gLo, loV)
+        // 3) Sınıflandır (güncel fiyata göre) + Top-3 seçim + dar bölge kutusu
+        nG = array.size(gP)
+        if nG > 0
+            gUsed = array.new_bool(nG, false)
+            xL = bar_index - 80
+            xRr = bar_index + 15
+            for side = 0 to 1                      // 0 = destek (lv < close), 1 = direnç (lv > close)
+                for rank = 1 to 3
+                    int bi = -1
+                    float bs = 0.0
+                    for k = 0 to nG - 1
+                        okSide = side == 0 ? array.get(gP, k) < close : array.get(gP, k) > close
+                        if not array.get(gUsed, k) and okSide and array.get(gSc, k) > bs
+                            bs := array.get(gSc, k)
+                            bi := k
+                    if bi >= 0
+                        array.set(gUsed, bi, true)
+                        mP = array.get(gP, bi)
+                        zT = array.get(gHi, bi)
+                        zB = array.get(gLo, bi)
+                        if zT - zB < 0.3 * atr      // dar ATR bölgesi: minimum kalınlık
+                            zT := mP + 0.15 * atr
+                            zB := mP - 0.15 * atr
+                        cS = side == 0 ? color.green : color.red
+                        array.push(m2Bx, box.new(xL, zT, xRr, zB, bgcolor = color.new(cS, 85), border_color = color.new(cS, 55), border_width = array.get(gSc, bi) >= 5 ? 2 : 1))
+                        txt = (side == 0 ? "S" : "R") + str.tostring(rank) + ": " + str.tostring(mP, format.mintick) + "  " + str.tostring(array.get(gT, bi)) + "t  s:" + str.tostring(array.get(gSc, bi), "0.#")
+                        array.push(m2Lb, label.new(xRr, mP, txt, color = color.new(cS, 80), textcolor = color.white, size = size.tiny, style = label.style_label_left))
+
+// ############################################################################
+//  M3 — DİNAMİK TREND OMURGASI  (EMA50 + EMA200 + KAMA(10) + opsiyonel ribbon)
+//  M1 ve M2'den TAMAMEN BAĞIMSIZ: onların state'ine, fonksiyonlarına ve
+//  inputlarına dokunmaz; TL seçimlerini ve S/R bölgelerini FİLTRELEMEZ.
+//  Yön (EMA50 vs EMA200) yalnızca ribbon rengini besler; başka hiçbir şeyi.
+//  YOK: skor, sinyal, panel, strateji, Best-MA, Fib/FVG/RSI/MACD/Ichimoku/HTF.
+// ############################################################################
+gM3 = "M3 — Trend Omurgası"
+emaFastLen = input.int(50,  "EMA Hızlı Periyot", minval = 1, group = gM3)
+emaSlowLen = input.int(200, "EMA Yavaş Periyot", minval = 1, group = gM3)
+kamaLen    = input.int(10,  "KAMA Periyodu", minval = 2, group = gM3)
+showEmaLn  = input.bool(true, "EMA Çizgileri", group = gM3)
+showKama   = input.bool(true, "KAMA Çizgisi", group = gM3)
+showRibbon = input.bool(true, "Ribbon (çok soluk fill)", group = gM3)
+
+emaF = ta.ema(close, emaFastLen)
+emaS = ta.ema(close, emaSlowLen)
+
+// KAMA (Kaufman): ER = |close - close[n]| / Σ|Δclose|  (payda 0 -> ER 0)
+//                 SC = (ER * (fast - slow) + slow)^2 ; fast = 2/3, slow = 2/31
+kamaSeed  = ta.sma(close, kamaLen)                                 // tohum (koşulsuz hesap)
+kamaNoise = math.sum(math.abs(ta.change(close)), kamaLen)
+kamaER    = na(kamaNoise) or kamaNoise == 0 ? 0.0 : math.abs(close - close[kamaLen]) / kamaNoise
+kamaSC    = math.pow(kamaER * (2.0 / 3.0 - 2.0 / 31.0) + 2.0 / 31.0, 2)
+var float kamaV = na
+kamaV := na(kamaV[1]) ? kamaSeed : kamaV[1] + kamaSC * (close - kamaV[1])
+
+m3Up = emaF > emaS   // ana trend YUKARI; yalnızca ribbon rengi için kullanılır
+
+plot(showEmaLn ? emaF : na, "M3 EMA50",  color = color.new(color.orange, 0), linewidth = 1)
+plot(showEmaLn ? emaS : na, "M3 EMA200", color = color.new(color.purple, 0), linewidth = 2)
+plot(showKama ? kamaV : na, "M3 KAMA",   color = color.new(color.yellow, 0), linewidth = 2)
+m3p1 = plot(emaF, "M3 RibbonA", color = na, display = display.none)
+m3p2 = plot(emaS, "M3 RibbonB", color = na, display = display.none)
+fill(m3p1, m3p2, color = showRibbon ? (m3Up ? color.new(color.green, 92) : color.new(color.red, 92)) : na)
